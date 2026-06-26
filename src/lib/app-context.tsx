@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -30,6 +31,47 @@ export type VoteBetResult = {
   winnings: number;
   description: string;
 };
+
+// ─── localStorage persistence ─────────────────────────────────────────────────
+
+const SESSION_KEY = "merdabet_v1";
+const SESSION_TTL = 10 * 60 * 1000; // 10 minutes in ms
+
+type SavedSession = {
+  user: User;
+  balance: number;
+  userRegistry: Record<string, string>;
+  playerStats: Record<string, PlayerStats>;
+  groups: Group[];
+  joinedGroupIds: string[];
+  parties: Party[];
+  pending: PendingBet[];
+  bets: Bet[];
+  esmolas: Esmola[];
+  lastActive: number;
+};
+
+function loadSession(): SavedSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const s: SavedSession = JSON.parse(raw);
+    if (Date.now() - (s.lastActive ?? 0) > SESSION_TTL) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  if (typeof window !== "undefined") localStorage.removeItem(SESSION_KEY);
+}
+
+// ─── Context types ────────────────────────────────────────────────────────────
 
 type Ctx = {
   user: User;
@@ -66,17 +108,47 @@ type Ctx = {
 
 const AppContext = createContext<Ctx | null>(null);
 
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User>(null);
-  const [balance, setBalance] = useState(0);
-  const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
-  const [playerStats, setPlayerStats] = useState<Record<string, PlayerStats>>({});
-  const [groups, setGroups] = useState<Group[]>(initialGroups);
-  const [joinedGroupIds, setJoined] = useState<string[]>([]);
-  const [parties, setParties] = useState<Party[]>(initialParties);
-  const [pending, setPending] = useState<PendingBet[]>(initialPending);
-  const [bets, setBets] = useState<Bet[]>(initialBets);
-  const [esmolas, setEsmolas] = useState<Esmola[]>(initialEsmolas);
+  // Restore from localStorage on first render (lazy initializer runs once)
+  const [initial] = useState<SavedSession | null>(() => loadSession());
+
+  const [user, setUser] = useState<User>(initial?.user ?? null);
+  const [balance, setBalance] = useState<number>(initial?.balance ?? 0);
+  const [userRegistry, setUserRegistry] = useState<Record<string, string>>(
+    initial?.userRegistry ?? {},
+  );
+  const [playerStats, setPlayerStats] = useState<Record<string, PlayerStats>>(
+    initial?.playerStats ?? {},
+  );
+  const [groups, setGroups] = useState<Group[]>(initial?.groups ?? initialGroups);
+  const [joinedGroupIds, setJoined] = useState<string[]>(initial?.joinedGroupIds ?? []);
+  const [parties, setParties] = useState<Party[]>(initial?.parties ?? initialParties);
+  const [pending, setPending] = useState<PendingBet[]>(initial?.pending ?? initialPending);
+  const [bets, setBets] = useState<Bet[]>(initial?.bets ?? initialBets);
+  const [esmolas, setEsmolas] = useState<Esmola[]>(initial?.esmolas ?? initialEsmolas);
+
+  // Persist entire state to localStorage whenever anything changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const session: SavedSession = {
+      user,
+      balance,
+      userRegistry,
+      playerStats,
+      groups,
+      joinedGroupIds,
+      parties,
+      pending,
+      bets,
+      esmolas,
+      lastActive: Date.now(),
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  }, [user, balance, userRegistry, playerStats, groups, joinedGroupIds, parties, pending, bets, esmolas]);
+
+  // ─── Auth ───────────────────────────────────────────────────────────────────
 
   const login = useCallback(
     (name: string, password: string): string | null => {
@@ -85,7 +157,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return "Senha incorreta para este usuário.";
         }
         setUser({ name });
-        setBalance(50);
+        // restore balance from playerStats if returning user
+        const savedBalance = playerStats[name]?.balance ?? 50;
+        setBalance(savedBalance);
         return null;
       }
       setUserRegistry((r) => ({ ...r, [name]: password }));
@@ -97,12 +171,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }));
       return null;
     },
-    [userRegistry],
+    [userRegistry, playerStats],
   );
 
   const logout = useCallback(() => {
     setUser(null);
     setBalance(0);
+    clearSession();
   }, []);
 
   const addBalance = useCallback((n: number) => setBalance((b) => b + n), []);
@@ -114,6 +189,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [balance],
   );
+
+  // ─── Groups ──────────────────────────────────────────────────────────────────
 
   const createGroup = useCallback(
     (name: string, password: string) => {
@@ -141,6 +218,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setJoined((j) => (j.includes(id) ? j : [...j, id]));
   }, []);
 
+  // ─── Parties ─────────────────────────────────────────────────────────────────
+
   const addParty = useCallback(
     (groupId: string, name: string, start: string, end: string) => {
       const p: Party = {
@@ -160,50 +239,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const confirmAttendance = useCallback((partyId: string) => {
     setParties((ps) =>
       ps.map((p) =>
-        p.id === partyId
-          ? { ...p, attending: true, attendees: p.attendees + 1 }
-          : p,
+        p.id === partyId ? { ...p, attending: true, attendees: p.attendees + 1 } : p,
       ),
     );
     setBalance((b) => b + 10);
   }, []);
 
-  const votePending = useCallback(
-    (id: string, vote: "approve" | "reject") => {
-      setPending((ps) => {
-        const updated = ps.map((p) => {
-          if (p.id !== id) return p;
-          if (p.approvedByMe || p.rejectedByMe) return p;
-          const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
-          return {
-            ...p,
-            approvals: newApprovals,
-            approvedByMe: vote === "approve" ? true : p.approvedByMe,
-            rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
-          };
-        });
+  // ─── Pending bets ────────────────────────────────────────────────────────────
 
-        const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
-        if (promoted) {
-          setBets((bs) => [
-            {
-              id: `b${Date.now()}`,
-              partyId: promoted.partyId,
-              description: promoted.description,
-              oddFor: promoted.oddFor,
-              oddAgainst: promoted.oddAgainst,
-              votesHappened: 0,
-              votesNot: 0,
-            },
-            ...bs,
-          ]);
-          return updated.filter((p) => p.id !== id);
-        }
-        return updated;
+  const votePending = useCallback((id: string, vote: "approve" | "reject") => {
+    setPending((ps) => {
+      const updated = ps.map((p) => {
+        if (p.id !== id) return p;
+        if (p.approvedByMe || p.rejectedByMe) return p;
+        const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
+        return {
+          ...p,
+          approvals: newApprovals,
+          approvedByMe: vote === "approve" ? true : p.approvedByMe,
+          rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
+        };
       });
-    },
-    [],
-  );
+      const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
+      if (promoted) {
+        setBets((bs) => [
+          {
+            id: `b${Date.now()}`,
+            partyId: promoted.partyId,
+            description: promoted.description,
+            oddFor: promoted.oddFor,
+            oddAgainst: promoted.oddAgainst,
+            votesHappened: 0,
+            votesNot: 0,
+          },
+          ...bs,
+        ]);
+        return updated.filter((p) => p.id !== id);
+      }
+      return updated;
+    });
+  }, []);
 
   const suggestBet = useCallback(
     (partyId: string, description: string, oddFor: number, oddAgainst: number) => {
@@ -223,6 +298,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [parties],
   );
+
+  // ─── Live bets ───────────────────────────────────────────────────────────────
 
   const placeBet = useCallback(
     (betId: string, side: "for" | "against", amount: number) => {
@@ -249,10 +326,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { resolved: false, won: false, winnings: 0, description: "" };
       }
 
-      const newVotesHappened =
-        vote === "happened" ? bet.votesHappened + 1 : bet.votesHappened;
-      const newVotesNot =
-        vote === "not" ? bet.votesNot + 1 : bet.votesNot;
+      const newVotesHappened = vote === "happened" ? bet.votesHappened + 1 : bet.votesHappened;
+      const newVotesNot = vote === "not" ? bet.votesNot + 1 : bet.votesNot;
 
       let outcome: "happened" | "not" | undefined;
       if (newVotesHappened >= 2) outcome = "happened";
@@ -267,8 +342,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           (outcome === "not" && bet.placed.side === "against");
         if (won) {
           winnings = Math.round(
-            bet.placed.amount *
-              (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst),
+            bet.placed.amount * (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst),
           );
           setBalance((b) => {
             const newBal = b + winnings;
@@ -286,27 +360,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setBets((bs) =>
         bs.map((b) =>
           b.id === betId
-            ? {
-                ...b,
-                votesHappened: newVotesHappened,
-                votesNot: newVotesNot,
-                voted: vote,
-                resolved: outcome,
-              }
+            ? { ...b, votesHappened: newVotesHappened, votesNot: newVotesNot, voted: vote, resolved: outcome }
             : b,
         ),
       );
 
-      return {
-        resolved: !!outcome,
-        outcome,
-        won,
-        winnings,
-        description: bet.description,
-      };
+      return { resolved: !!outcome, outcome, won, winnings, description: bet.description };
     },
-    [bets],
+    [bets, user],
   );
+
+  // ─── Esmola ──────────────────────────────────────────────────────────────────
 
   const requestEsmola = useCallback(
     (groupId: string, amount: number) => {
@@ -320,37 +384,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const donateEsmola = useCallback((id: string) => {
-    setEsmolas((es) =>
-      es.map((e) => (e.id === id ? { ...e, donated: true } : e)),
-    );
+    setEsmolas((es) => es.map((e) => (e.id === id ? { ...e, donated: true } : e)));
   }, []);
+
+  // ─── Value ───────────────────────────────────────────────────────────────────
 
   const value = useMemo<Ctx>(
     () => ({
-      user,
-      balance,
-      login,
-      logout,
-      addBalance,
-      spend,
-      groups,
-      joinedGroupIds,
-      createGroup,
-      joinGroup,
-      deleteGroup,
-      parties,
-      addParty,
-      confirmAttendance,
-      pending,
-      votePending,
-      suggestBet,
-      bets,
-      placeBet,
-      voteBet,
-      esmolas,
-      requestEsmola,
-      donateEsmola,
+      user, balance, login, logout, addBalance, spend,
+      groups, joinedGroupIds, createGroup, joinGroup, deleteGroup,
+      parties, addParty, confirmAttendance,
+      pending, votePending, suggestBet,
+      bets, placeBet, voteBet,
       playerStats,
+      esmolas, requestEsmola, donateEsmola,
     }),
     [
       user, balance, login, logout, addBalance, spend,
@@ -358,8 +405,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
       bets, placeBet, voteBet,
-      esmolas, requestEsmola, donateEsmola,
       playerStats,
+      esmolas, requestEsmola, donateEsmola,
     ],
   );
 
