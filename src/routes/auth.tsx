@@ -37,7 +37,7 @@ function AuthPage() {
     setUsernameErr("");
   }
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setUsernameErr("");
     setPasswordErr("");
@@ -63,7 +63,7 @@ function AuthPage() {
       return;
     }
 
-    const err = login(u, p);
+    const err = await login(u, p);
     if (err) {
       setPasswordErr(err);
       return;

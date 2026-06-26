@@ -4,15 +4,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { supabase } from "./supabase";
 import {
-  initialBets,
-  initialEsmolas,
-  initialGroups,
-  initialParties,
-  initialPending,
   type Bet,
   type Esmola,
   type Group,
@@ -32,32 +29,20 @@ export type VoteBetResult = {
   description: string;
 };
 
-// ─── localStorage persistence ─────────────────────────────────────────────────
+// ─── Session (localStorage: only username + expiry) ───────────────────────────
 
-const SESSION_KEY = "merdabet_v1";
-const SESSION_TTL = 10 * 60 * 1000; // 10 minutes in ms
+const SESSION_KEY = "merdabet_session_v2";
+const SESSION_TTL = 10 * 60 * 1000;
 
-type SavedSession = {
-  user: User;
-  balance: number;
-  userRegistry: Record<string, string>;
-  playerStats: Record<string, PlayerStats>;
-  groups: Group[];
-  joinedGroupIds: string[];
-  parties: Party[];
-  pending: PendingBet[];
-  bets: Bet[];
-  esmolas: Esmola[];
-  lastActive: number;
-};
+type SessionData = { username: string; expiry: number };
 
-function loadSession(): SavedSession | null {
+function loadSession(): SessionData | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const s: SavedSession = JSON.parse(raw);
-    if (Date.now() - (s.lastActive ?? 0) > SESSION_TTL) {
+    const s: SessionData = JSON.parse(raw);
+    if (Date.now() > s.expiry) {
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
@@ -67,16 +52,93 @@ function loadSession(): SavedSession | null {
   }
 }
 
+function saveSession(username: string) {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ username, expiry: Date.now() + SESSION_TTL }),
+    );
+  }
+}
+
 function clearSession() {
   if (typeof window !== "undefined") localStorage.removeItem(SESSION_KEY);
 }
 
-// ─── Context types ────────────────────────────────────────────────────────────
+// ─── DB row types ──────────────────────────────────────────────────────────────
+
+type DbUser = { id: string; balance: number; bet_count: number };
+type DbGroup = { id: string; name: string; password: string; created_by: string; members: number };
+type DbParty = {
+  id: string; group_id: string; name: string;
+  start_time: string; end_time: string; status: string; attendees: number;
+};
+type DbPendingBet = {
+  id: string; party_id: string; description: string;
+  odd: number; approvals: number; needed: number;
+};
+type DbBet = {
+  id: string; party_id: string; description: string;
+  odd: number; votes_happened: number; votes_not: number; resolved: string | null;
+};
+type DbEsmola = { id: string; group_id: string; user_id: string; amount: number; donated: boolean };
+
+// ─── Mapping helpers ───────────────────────────────────────────────────────────
+
+function mapGroup(r: DbGroup): Group {
+  return { id: r.id, name: r.name, password: r.password, createdBy: r.created_by, members: r.members };
+}
+
+function mapParty(r: DbParty, attendedIds: Set<string>): Party {
+  return {
+    id: r.id, groupId: r.group_id, name: r.name,
+    start: r.start_time, end: r.end_time,
+    status: r.status as Party["status"],
+    attendees: r.attendees,
+    attending: attendedIds.has(r.id),
+  };
+}
+
+function mapPendingBet(
+  r: DbPendingBet,
+  approvedIds: Set<string>,
+  rejectedIds: Set<string>,
+): PendingBet {
+  return {
+    id: r.id, partyId: r.party_id, description: r.description,
+    odd: Number(r.odd), approvals: r.approvals, needed: r.needed,
+    approvedByMe: approvedIds.has(r.id),
+    rejectedByMe: rejectedIds.has(r.id),
+  };
+}
+
+function mapBet(
+  r: DbBet,
+  placedMap: Map<string, number>,
+  votedMap: Map<string, "happened" | "not">,
+): Bet {
+  const placed = placedMap.get(r.id);
+  const voted = votedMap.get(r.id);
+  return {
+    id: r.id, partyId: r.party_id, description: r.description,
+    odd: Number(r.odd),
+    votesHappened: r.votes_happened, votesNot: r.votes_not,
+    resolved: r.resolved as Bet["resolved"],
+    placed: placed !== undefined ? { amount: placed } : undefined,
+    voted,
+  };
+}
+
+function mapEsmola(r: DbEsmola): Esmola {
+  return { id: r.id, groupId: r.group_id, user: r.user_id, amount: r.amount, donated: r.donated };
+}
+
+// ─── Context types ─────────────────────────────────────────────────────────────
 
 type Ctx = {
   user: User;
   balance: number;
-  login: (name: string, password: string) => string | null;
+  login: (name: string, password: string) => Promise<string | null>;
   logout: () => void;
   addBalance: (n: number) => void;
   spend: (n: number) => boolean;
@@ -111,114 +173,344 @@ const AppContext = createContext<Ctx | null>(null);
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // Restore from localStorage on first render (lazy initializer runs once)
-  const [initial] = useState<SavedSession | null>(() => loadSession());
+  const [user, setUser] = useState<User>(null);
+  const [balance, setBalance] = useState<number>(0);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [joinedGroupIds, setJoined] = useState<string[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [pending, setPending] = useState<PendingBet[]>([]);
+  const [bets, setBets] = useState<Bet[]>([]);
+  const [esmolas, setEsmolas] = useState<Esmola[]>([]);
+  const [playerStats, setPlayerStats] = useState<Record<string, PlayerStats>>({});
 
-  const [user, setUser] = useState<User>(initial?.user ?? null);
-  const [balance, setBalance] = useState<number>(initial?.balance ?? 0);
-  const [userRegistry, setUserRegistry] = useState<Record<string, string>>(
-    initial?.userRegistry ?? {},
-  );
-  const [playerStats, setPlayerStats] = useState<Record<string, PlayerStats>>(
-    initial?.playerStats ?? {},
-  );
-  const [groups, setGroups] = useState<Group[]>(initial?.groups ?? initialGroups);
-  const [joinedGroupIds, setJoined] = useState<string[]>(initial?.joinedGroupIds ?? []);
-  const [parties, setParties] = useState<Party[]>(initial?.parties ?? initialParties);
-  const [pending, setPending] = useState<PendingBet[]>(initial?.pending ?? initialPending);
-  const [bets, setBets] = useState<Bet[]>(initial?.bets ?? initialBets);
-  const [esmolas, setEsmolas] = useState<Esmola[]>(initial?.esmolas ?? initialEsmolas);
+  // Per-user junction data (stable refs, updated on load/subscription)
+  const attendedIdsRef = useRef<Set<string>>(new Set());
+  const approvedPendingIdsRef = useRef<Set<string>>(new Set());
+  const rejectedPendingIdsRef = useRef<Set<string>>(new Set());
+  const placedMapRef = useRef<Map<string, number>>(new Map());
+  const votedMapRef = useRef<Map<string, "happened" | "not">>(new Map());
 
-  // Persist entire state to localStorage whenever anything changes
+  // ─── Data loading ────────────────────────────────────────────────────────────
+
+  const loadUserData = useCallback(async (username: string) => {
+    const [
+      groupsRes,
+      joinedRes,
+      partiesRes,
+      attendedRes,
+      pendingRes,
+      pendingVotesRes,
+      betsRes,
+      placementsRes,
+      betVotesRes,
+      esmolasRes,
+      usersRes,
+    ] = await Promise.all([
+      supabase.from("groups").select("*").order("created_at", { ascending: false }),
+      supabase.from("group_members").select("group_id").eq("user_id", username),
+      supabase.from("parties").select("*").order("created_at", { ascending: false }),
+      supabase.from("party_attendees").select("party_id").eq("user_id", username),
+      supabase.from("pending_bets").select("*").order("created_at", { ascending: false }),
+      supabase.from("pending_bet_votes").select("pending_bet_id, vote").eq("user_id", username),
+      supabase.from("bets").select("*").order("created_at", { ascending: false }),
+      supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
+      supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
+      supabase.from("esmolas").select("*").order("created_at", { ascending: false }),
+      supabase.from("users").select("id, balance, bet_count"),
+    ]);
+
+    // Build per-user sets/maps
+    const attendedIds = new Set<string>((attendedRes.data ?? []).map((r: { party_id: string }) => r.party_id));
+    const approvedIds = new Set<string>(
+      (pendingVotesRes.data ?? [])
+        .filter((r: { pending_bet_id: string; vote: string }) => r.vote === "approve")
+        .map((r: { pending_bet_id: string }) => r.pending_bet_id),
+    );
+    const rejectedIds = new Set<string>(
+      (pendingVotesRes.data ?? [])
+        .filter((r: { pending_bet_id: string; vote: string }) => r.vote === "reject")
+        .map((r: { pending_bet_id: string }) => r.pending_bet_id),
+    );
+    const placedMap = new Map<string, number>(
+      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
+    );
+    const votedMap = new Map<string, "happened" | "not">(
+      (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not"] as [string, "happened" | "not"]),
+    );
+
+    attendedIdsRef.current = attendedIds;
+    approvedPendingIdsRef.current = approvedIds;
+    rejectedPendingIdsRef.current = rejectedIds;
+    placedMapRef.current = placedMap;
+    votedMapRef.current = votedMap;
+
+    setGroups((groupsRes.data ?? []).map(mapGroup));
+    setJoined((joinedRes.data ?? []).map((r: { group_id: string }) => r.group_id));
+    setParties((partiesRes.data ?? []).map((r: DbParty) => mapParty(r, attendedIds)));
+    setPending((pendingRes.data ?? []).map((r: DbPendingBet) => mapPendingBet(r, approvedIds, rejectedIds)));
+    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap)));
+    setEsmolas((esmolasRes.data ?? []).map(mapEsmola));
+
+    const stats: Record<string, PlayerStats> = {};
+    for (const u of (usersRes.data ?? []) as DbUser[]) {
+      stats[u.id] = { balance: u.balance, betCount: u.bet_count };
+    }
+    setPlayerStats(stats);
+
+    // Set current user balance from DB
+    const me = (usersRes.data ?? []).find((u: DbUser) => u.id === username) as DbUser | undefined;
+    if (me) setBalance(me.balance);
+  }, []);
+
+  const refreshParties = useCallback(async (username: string) => {
+    const [partiesRes, attendedRes] = await Promise.all([
+      supabase.from("parties").select("*").order("created_at", { ascending: false }),
+      supabase.from("party_attendees").select("party_id").eq("user_id", username),
+    ]);
+    const attendedIds = new Set<string>((attendedRes.data ?? []).map((r: { party_id: string }) => r.party_id));
+    attendedIdsRef.current = attendedIds;
+    setParties((partiesRes.data ?? []).map((r: DbParty) => mapParty(r, attendedIds)));
+  }, []);
+
+  const refreshPending = useCallback(async (username: string) => {
+    const [pendingRes, pendingVotesRes] = await Promise.all([
+      supabase.from("pending_bets").select("*").order("created_at", { ascending: false }),
+      supabase.from("pending_bet_votes").select("pending_bet_id, vote").eq("user_id", username),
+    ]);
+    const approvedIds = new Set<string>(
+      (pendingVotesRes.data ?? [])
+        .filter((r: { pending_bet_id: string; vote: string }) => r.vote === "approve")
+        .map((r: { pending_bet_id: string }) => r.pending_bet_id),
+    );
+    const rejectedIds = new Set<string>(
+      (pendingVotesRes.data ?? [])
+        .filter((r: { pending_bet_id: string; vote: string }) => r.vote === "reject")
+        .map((r: { pending_bet_id: string }) => r.pending_bet_id),
+    );
+    approvedPendingIdsRef.current = approvedIds;
+    rejectedPendingIdsRef.current = rejectedIds;
+    setPending((pendingRes.data ?? []).map((r: DbPendingBet) => mapPendingBet(r, approvedIds, rejectedIds)));
+  }, []);
+
+  const refreshBets = useCallback(async (username: string) => {
+    const [betsRes, placementsRes, betVotesRes] = await Promise.all([
+      supabase.from("bets").select("*").order("created_at", { ascending: false }),
+      supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
+      supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
+    ]);
+    const placedMap = new Map<string, number>(
+      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
+    );
+    const votedMap = new Map<string, "happened" | "not">(
+      (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not"] as [string, "happened" | "not"]),
+    );
+    placedMapRef.current = placedMap;
+    votedMapRef.current = votedMap;
+    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap)));
+  }, []);
+
+  const refreshPlayerStats = useCallback(async () => {
+    const { data } = await supabase.from("users").select("id, balance, bet_count");
+    const stats: Record<string, PlayerStats> = {};
+    for (const u of (data ?? []) as DbUser[]) {
+      stats[u.id] = { balance: u.balance, betCount: u.bet_count };
+    }
+    setPlayerStats(stats);
+  }, []);
+
+  // ─── Restore session on mount ─────────────────────────────────────────────────
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const session: SavedSession = {
-      user,
-      balance,
-      userRegistry,
-      playerStats,
-      groups,
-      joinedGroupIds,
-      parties,
-      pending,
-      bets,
-      esmolas,
-      lastActive: Date.now(),
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  }, [user, balance, userRegistry, playerStats, groups, joinedGroupIds, parties, pending, bets, esmolas]);
+    const session = loadSession();
+    if (session) {
+      setUser({ name: session.username });
+    }
+  }, []);
 
-  // ─── Auth ───────────────────────────────────────────────────────────────────
+  // ─── Load data when user logs in ──────────────────────────────────────────────
 
-  const login = useCallback(
-    (name: string, password: string): string | null => {
-      if (name in userRegistry) {
-        if (userRegistry[name] !== password) {
-          return "Senha incorreta para este usuário.";
+  useEffect(() => {
+    if (!user) return;
+    loadUserData(user.name);
+  }, [user, loadUserData]);
+
+  // ─── Realtime subscriptions ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!user) return;
+    const username = user.name;
+
+    const channel = supabase
+      .channel(`merdabet-${username}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "groups" }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          const g = mapGroup(payload.new as DbGroup);
+          setGroups((prev) => {
+            if (prev.some((x) => x.id === g.id)) return prev;
+            return [g, ...prev];
+          });
+        } else if (payload.eventType === "DELETE") {
+          setGroups((prev) => prev.filter((x) => x.id !== (payload.old as { id: string }).id));
+        } else if (payload.eventType === "UPDATE") {
+          const g = mapGroup(payload.new as DbGroup);
+          setGroups((prev) => prev.map((x) => (x.id === g.id ? g : x)));
         }
-        setUser({ name });
-        // restore balance from playerStats if returning user
-        const savedBalance = playerStats[name]?.balance ?? 50;
-        setBalance(savedBalance);
-        return null;
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "parties" }, () => {
+        refreshParties(username);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "pending_bets" }, () => {
+        refreshPending(username);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "bets" }, () => {
+        refreshBets(username);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "esmolas" }, () => {
+        supabase
+          .from("esmolas")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .then(({ data }) => {
+            if (data) setEsmolas(data.map(mapEsmola));
+          });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "users" }, () => {
+        refreshPlayerStats();
+        // Also update own balance if it changed
+        supabase
+          .from("users")
+          .select("balance")
+          .eq("id", username)
+          .single()
+          .then(({ data }) => {
+            if (data) setBalance((data as { balance: number }).balance);
+          });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, refreshParties, refreshPending, refreshBets, refreshPlayerStats]);
+
+  // ─── Auth ─────────────────────────────────────────────────────────────────────
+
+  const login = useCallback(async (name: string, password: string): Promise<string | null> => {
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("id, password, balance")
+      .eq("id", name)
+      .single();
+
+    if (existingUser) {
+      if ((existingUser as { password: string }).password !== password) {
+        return "Senha incorreta para este usuário.";
       }
-      setUserRegistry((r) => ({ ...r, [name]: password }));
       setUser({ name });
-      setBalance(50);
-      setPlayerStats((s) => ({
-        ...s,
-        [name]: { balance: 50, betCount: s[name]?.betCount ?? 0 },
-      }));
+      setBalance((existingUser as { balance: number }).balance);
+      saveSession(name);
       return null;
-    },
-    [userRegistry, playerStats],
-  );
+    }
+
+    // New user
+    const { error } = await supabase.from("users").insert({ id: name, password, balance: 50, bet_count: 0 });
+    if (error) return "Erro ao criar usuário. Tente novamente.";
+
+    setUser({ name });
+    setBalance(50);
+    saveSession(name);
+    return null;
+  }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     setBalance(0);
+    setGroups([]);
+    setJoined([]);
+    setParties([]);
+    setPending([]);
+    setBets([]);
+    setEsmolas([]);
+    setPlayerStats({});
     clearSession();
   }, []);
 
-  const addBalance = useCallback((n: number) => setBalance((b) => b + n), []);
-  const spend = useCallback(
+  const addBalance = useCallback(
     (n: number) => {
-      if (balance < n) return false;
-      setBalance((b) => b - n);
-      return true;
+      setBalance((b) => b + n);
+      if (user) {
+        const newBal = balance + n;
+        supabase.from("users").update({ balance: newBal }).eq("id", user.name).then(() => {});
+      }
     },
-    [balance],
+    [user, balance],
   );
 
-  // ─── Groups ──────────────────────────────────────────────────────────────────
+  const spend = useCallback(
+    (n: number): boolean => {
+      if (balance < n) return false;
+      const newBal = balance - n;
+      setBalance(newBal);
+      if (user) {
+        supabase.from("users").update({ balance: newBal }).eq("id", user.name).then(() => {});
+      }
+      return true;
+    },
+    [balance, user],
+  );
+
+  // ─── Groups ───────────────────────────────────────────────────────────────────
 
   const createGroup = useCallback(
-    (name: string, password: string) => {
+    (name: string, password: string): Group => {
       const g: Group = {
         id: `g${Date.now()}`,
         name,
-        members: 1,
         password,
         createdBy: user?.name ?? "",
+        members: 1,
       };
-      setGroups((gs) => [g, ...gs]);
-      setJoined((j) => [g.id, ...j]);
+      setGroups((prev) => [g, ...prev]);
+      setJoined((prev) => [g.id, ...prev]);
+      supabase
+        .from("groups")
+        .insert({ id: g.id, name: g.name, password: g.password, created_by: g.createdBy, members: 1 })
+        .then(() => {
+          if (user) {
+            supabase.from("group_members").insert({ group_id: g.id, user_id: user.name }).then(() => {});
+          }
+        });
       return g;
     },
     [user],
   );
 
-  const deleteGroup = useCallback((id: string) => {
-    setGroups((gs) => gs.filter((g) => g.id !== id));
-    setJoined((j) => j.filter((x) => x !== id));
-    setParties((ps) => ps.filter((p) => p.groupId !== id));
-  }, []);
+  const joinGroup = useCallback(
+    (id: string) => {
+      if (!user) return;
+      if (joinedGroupIds.includes(id)) return;
+      setJoined((prev) => [...prev, id]);
+      setGroups((prev) =>
+        prev.map((g) => (g.id === id ? { ...g, members: g.members + 1 } : g)),
+      );
+      const currentMembers = groups.find((g) => g.id === id)?.members ?? 0;
+      supabase.from("group_members").insert({ group_id: id, user_id: user.name }).then(() => {});
+      supabase.from("groups").update({ members: currentMembers + 1 }).eq("id", id).then(() => {});
+    },
+    [user, groups, joinedGroupIds],
+  );
 
-  const joinGroup = useCallback((id: string) => {
-    setJoined((j) => (j.includes(id) ? j : [...j, id]));
-  }, []);
+  const deleteGroup = useCallback(
+    (id: string) => {
+      setGroups((prev) => prev.filter((g) => g.id !== id));
+      setJoined((prev) => prev.filter((x) => x !== id));
+      setParties((prev) => prev.filter((p) => p.groupId !== id));
+      supabase.from("groups").delete().eq("id", id).then(() => {});
+    },
+    [],
+  );
 
-  // ─── Parties ─────────────────────────────────────────────────────────────────
+  // ─── Parties ──────────────────────────────────────────────────────────────────
 
   const addParty = useCallback(
     (groupId: string, name: string, start: string, end: string) => {
@@ -231,56 +523,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
         status: "pending",
         attendees: 0,
       };
-      setParties((ps) => [p, ...ps]);
+      setParties((prev) => [p, ...prev]);
+      supabase
+        .from("parties")
+        .insert({
+          id: p.id,
+          group_id: groupId,
+          name,
+          start_time: start,
+          end_time: end,
+          status: "pending",
+          attendees: 0,
+        })
+        .then(() => {});
     },
     [],
   );
 
-  const confirmAttendance = useCallback((partyId: string) => {
-    setParties((ps) =>
-      ps.map((p) =>
-        p.id === partyId ? { ...p, attending: true, attendees: p.attendees + 1 } : p,
-      ),
-    );
-    setBalance((b) => b + 10);
-  }, []);
+  const confirmAttendance = useCallback(
+    (partyId: string) => {
+      if (!user) return;
+      attendedIdsRef.current = new Set([...attendedIdsRef.current, partyId]);
+      const currentAttendees = parties.find((p) => p.id === partyId)?.attendees ?? 0;
+      setParties((prev) =>
+        prev.map((p) =>
+          p.id === partyId
+            ? { ...p, attending: true, attendees: p.attendees + 1 }
+            : p,
+        ),
+      );
+      const newBal = balance + 10;
+      setBalance(newBal);
+      supabase.from("party_attendees").insert({ party_id: partyId, user_id: user.name }).then(() => {});
+      supabase.from("parties").update({ attendees: currentAttendees + 1 }).eq("id", partyId).then(() => {});
+      supabase.from("users").update({ balance: newBal }).eq("id", user.name).then(() => {});
+    },
+    [user, balance, parties],
+  );
 
-  // ─── Pending bets ────────────────────────────────────────────────────────────
-
-  const votePending = useCallback((id: string, vote: "approve" | "reject") => {
-    setPending((ps) => {
-      const updated = ps.map((p) => {
-        if (p.id !== id) return p;
-        if (p.approvedByMe || p.rejectedByMe) return p;
-        const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
-        return {
-          ...p,
-          approvals: newApprovals,
-          approvedByMe: vote === "approve" ? true : p.approvedByMe,
-          rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
-        };
-      });
-      const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
-      if (promoted) {
-        setBets((bs) => [
-          {
-            id: `b${Date.now()}`,
-            partyId: promoted.partyId,
-            description: promoted.description,
-            odd: promoted.odd,
-            votesHappened: 0,
-            votesNot: 0,
-          },
-          ...bs,
-        ]);
-        return updated.filter((p) => p.id !== id);
-      }
-      return updated;
-    });
-  }, []);
+  // ─── Pending bets ─────────────────────────────────────────────────────────────
 
   const suggestBet = useCallback(
     (partyId: string, description: string, odd: number) => {
+      if (!user) return;
       const party = parties.find((p) => p.id === partyId);
       const attendees = party?.attendees ?? 0;
       const needed = Math.max(1, Math.ceil(attendees / 3));
@@ -292,35 +577,117 @@ export function AppProvider({ children }: { children: ReactNode }) {
         approvals: 0,
         needed,
       };
-      setPending((ps) => [pb, ...ps]);
+      setPending((prev) => [pb, ...prev]);
+      supabase
+        .from("pending_bets")
+        .insert({ id: pb.id, party_id: partyId, description, odd, approvals: 0, needed })
+        .then(() => {});
     },
-    [parties],
+    [user, parties],
   );
 
-  // ─── Live bets ───────────────────────────────────────────────────────────────
+  const votePending = useCallback(
+    (id: string, vote: "approve" | "reject") => {
+      if (!user) return;
+
+      setPending((prev) => {
+        const updated = prev.map((p) => {
+          if (p.id !== id) return p;
+          if (p.approvedByMe || p.rejectedByMe) return p;
+          const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
+          return {
+            ...p,
+            approvals: newApprovals,
+            approvedByMe: vote === "approve" ? true : p.approvedByMe,
+            rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
+          };
+        });
+
+        const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
+        if (promoted) {
+          const newBet: Bet = {
+            id: `b${Date.now()}`,
+            partyId: promoted.partyId,
+            description: promoted.description,
+            odd: promoted.odd,
+            votesHappened: 0,
+            votesNot: 0,
+          };
+          setBets((bs) => [newBet, ...bs]);
+          // DB: insert bet, delete pending
+          supabase
+            .from("bets")
+            .insert({
+              id: newBet.id,
+              party_id: promoted.partyId,
+              description: promoted.description,
+              odd: promoted.odd,
+              votes_happened: 0,
+              votes_not: 0,
+            })
+            .then(() => {
+              supabase.from("pending_bets").delete().eq("id", id).then(() => {});
+            });
+          return updated.filter((p) => p.id !== id);
+        }
+
+        return updated;
+      });
+
+      // Record user's vote and update approvals count in DB
+      supabase
+        .from("pending_bet_votes")
+        .insert({ pending_bet_id: id, user_id: user.name, vote })
+        .then(() => {});
+      if (vote === "approve") {
+        const currentApprovals = pending.find((p) => p.id === id)?.approvals ?? 0;
+        supabase
+          .from("pending_bets")
+          .update({ approvals: currentApprovals + 1 })
+          .eq("id", id)
+          .then(() => {});
+      }
+
+      if (vote === "approve") {
+        approvedPendingIdsRef.current = new Set([...approvedPendingIdsRef.current, id]);
+      } else {
+        rejectedPendingIdsRef.current = new Set([...rejectedPendingIdsRef.current, id]);
+      }
+    },
+    [user, pending],
+  );
+
+  // ─── Live bets ────────────────────────────────────────────────────────────────
 
   const placeBet = useCallback(
     (betId: string, amount: number) => {
-      setBets((bs) =>
-        bs.map((b) => (b.id === betId ? { ...b, placed: { amount } } : b)),
+      if (!user) return;
+      placedMapRef.current = new Map([...placedMapRef.current, [betId, amount]]);
+      setBets((prev) =>
+        prev.map((b) => (b.id === betId ? { ...b, placed: { amount } } : b)),
       );
-      if (user) {
-        setPlayerStats((s) => ({
-          ...s,
-          [user.name]: {
-            balance: s[user.name]?.balance ?? balance,
-            betCount: (s[user.name]?.betCount ?? 0) + 1,
-          },
-        }));
-      }
+      const newBetCount = (playerStats[user.name]?.betCount ?? 0) + 1;
+      setPlayerStats((s) => ({
+        ...s,
+        [user.name]: { balance: s[user.name]?.balance ?? balance, betCount: newBetCount },
+      }));
+      supabase
+        .from("bet_placements")
+        .insert({ bet_id: betId, user_id: user.name, amount })
+        .then(() => {});
+      supabase
+        .from("users")
+        .update({ bet_count: newBetCount })
+        .eq("id", user.name)
+        .then(() => {});
     },
-    [user, balance],
+    [user, playerStats, balance],
   );
 
   const voteBet = useCallback(
     (betId: string, vote: "happened" | "not"): VoteBetResult => {
       const bet = bets.find((b) => b.id === betId);
-      if (!bet || bet.voted) {
+      if (!bet || bet.voted || !user) {
         return { resolved: false, won: false, winnings: 0, description: "" };
       }
 
@@ -338,50 +705,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
         won = outcome === "happened";
         if (won) {
           winnings = Math.round(bet.placed.amount * bet.odd);
-          setBalance((b) => {
-            const newBal = b + winnings;
-            if (user) {
-              setPlayerStats((s) => ({
-                ...s,
-                [user.name]: { ...s[user.name], balance: newBal },
-              }));
-            }
-            return newBal;
-          });
+          const newBal = balance + winnings;
+          setBalance(newBal);
+          setPlayerStats((s) => ({
+            ...s,
+            [user.name]: { ...s[user.name], balance: newBal },
+          }));
+          supabase.from("users").update({ balance: newBal }).eq("id", user.name).then(() => {});
         }
       }
 
-      setBets((bs) =>
-        bs.map((b) =>
+      votedMapRef.current = new Map([...votedMapRef.current, [betId, vote]]);
+      setBets((prev) =>
+        prev.map((b) =>
           b.id === betId
             ? { ...b, votesHappened: newVotesHappened, votesNot: newVotesNot, voted: vote, resolved: outcome }
             : b,
         ),
       );
 
+      // DB updates
+      supabase
+        .from("bet_votes")
+        .insert({ bet_id: betId, user_id: user.name, vote })
+        .then(() => {});
+      supabase
+        .from("bets")
+        .update({
+          votes_happened: newVotesHappened,
+          votes_not: newVotesNot,
+          ...(outcome ? { resolved: outcome } : {}),
+        })
+        .eq("id", betId)
+        .then(() => {});
+
       return { resolved: !!outcome, outcome, won, winnings, description: bet.description };
     },
-    [bets, user],
+    [bets, user, balance],
   );
 
-  // ─── Esmola ──────────────────────────────────────────────────────────────────
+  // ─── Esmola ───────────────────────────────────────────────────────────────────
 
   const requestEsmola = useCallback(
     (groupId: string, amount: number) => {
       if (!user) return;
-      setEsmolas((es) => [
-        { id: `e${Date.now()}`, groupId, user: user.name, amount },
-        ...es,
-      ]);
+      const e: Esmola = { id: `e${Date.now()}`, groupId, user: user.name, amount, donated: false };
+      setEsmolas((prev) => [e, ...prev]);
+      supabase
+        .from("esmolas")
+        .insert({ id: e.id, group_id: groupId, user_id: user.name, amount, donated: false })
+        .then(() => {});
     },
     [user],
   );
 
   const donateEsmola = useCallback((id: string) => {
-    setEsmolas((es) => es.map((e) => (e.id === id ? { ...e, donated: true } : e)));
+    setEsmolas((prev) => prev.map((e) => (e.id === id ? { ...e, donated: true } : e)));
+    supabase.from("esmolas").update({ donated: true }).eq("id", id).then(() => {});
   }, []);
 
-  // ─── Value ───────────────────────────────────────────────────────────────────
+  // ─── Context value ────────────────────────────────────────────────────────────
 
   const value = useMemo<Ctx>(
     () => ({
