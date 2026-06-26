@@ -20,6 +20,10 @@ export const Route = createFileRoute("/group/$groupId")({
   component: GroupPage,
 });
 
+function formatMoneyShort(amount: number): string {
+  return `${amount}$`;
+}
+
 function GroupPage() {
   const { groupId } = Route.useParams();
   const { groups, parties, pending, bets, esmolas, requestEsmola, donateEsmola, addParty, spend, confirmAttendance } =
@@ -93,13 +97,13 @@ function GroupPage() {
         </section>
 
         {/* Esmola card */}
-        <section className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">
+        <section className="space-y-2 rounded-2xl border border-border/60 bg-card p-3">
           <div>
-            <h3 className="flex items-center gap-1.5 text-sm font-black uppercase tracking-widest text-neon-purple">
-              <HandHeart className="h-4 w-4" />
+            <h3 className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-neon-purple">
+              <HandHeart className="h-3.5 w-3.5" />
               Esmolinha
             </h3>
-            <p className="text-xs text-muted-foreground">Tá liso? Pede aí.</p>
+            <p className="text-[11px] text-muted-foreground">Tá liso? Pede aí.</p>
           </div>
           <div className="flex items-center gap-2">
             <Input
@@ -109,10 +113,10 @@ function GroupPage() {
               min={1}
               value={askAmt}
               onChange={(e) => setAskAmt(Math.max(1, Number(e.target.value) || 1))}
-              className="h-12 text-base font-bold tabular-nums"
+              className="h-10 text-sm font-bold tabular-nums"
             />
             <Button
-              className="glow-purple h-12 shrink-0 bg-primary font-bold text-primary-foreground"
+              className="glow-purple h-10 shrink-0 px-3 text-xs font-bold text-primary-foreground"
               onClick={() => {
                 requestEsmola(groupId, askAmt);
                 toast.success(`Pediu ${askAmt} conto de esmola`);
@@ -123,17 +127,17 @@ function GroupPage() {
           </div>
 
           {groupEsmolas.length > 0 && (
-            <div className="-mx-1 flex gap-2 overflow-x-auto pb-1 pt-2">
+            <div className="-mx-1 flex gap-2 overflow-x-auto pb-1 pt-1">
               {groupEsmolas.map((e) => (
                 <div
                   key={e.id}
-                  className="flex min-w-[210px] flex-col gap-2 rounded-xl border border-border/60 bg-background/60 p-3"
+                  className="flex min-w-[188px] flex-col gap-1.5 rounded-xl border border-border/60 bg-background/60 p-2"
                 >
                   <div className="flex items-center gap-2">
-                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/20 text-xs font-black text-primary-foreground">
+                    <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/20 text-[11px] font-black text-primary-foreground">
                       {e.user.slice(0, 2).toUpperCase()}
                     </div>
-                    <div className="min-w-0 text-xs">
+                    <div className="min-w-0 text-[11px]">
                       <p className="truncate font-bold">{e.user}</p>
                       <p className="flex items-center gap-1 font-black tabular-nums text-green-400">
                         <Coins className="h-3 w-3" />
@@ -152,7 +156,7 @@ function GroupPage() {
                       donateEsmola(e.id);
                       toast.success(`Você doou ${e.amount} conto`);
                     }}
-                    className="h-9 font-bold"
+                    className="h-8 text-xs font-bold"
                   >
                     {e.donated ? "Doado ✓" : "Doar"}
                   </Button>
@@ -274,7 +278,7 @@ function PartyCard({
                     </span>
                     {b.placementsCount > 0 && (
                       <span className="text-[10px] tabular-nums text-muted-foreground">
-                        {b.placementsCount}🧑 · {b.totalWagered}c
+                        {b.placementsCount}🧑 · {formatMoneyShort(b.totalWagered)}
                       </span>
                     )}
                   </div>

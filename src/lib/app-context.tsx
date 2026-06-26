@@ -80,12 +80,15 @@ type DbPendingBet = {
 type DbBet = {
   id: string; party_id: string; description: string;
   odd: number; votes_happened: number; votes_not: number; resolved: string | null;
+  initial_odd?: number | null; current_odd?: number | null;
+  validated_at?: string | null; odd_time_block?: number | null;
   placements_count: number; total_wagered: number;
   dispute_type: string | null; dispute_new_odd: number | null;
   dispute_approvals: number; dispute_rejections: number;
   dispute_needed: number; dispute_status: string;
 };
 type DbEsmola = { id: string; group_id: string; user_id: string; amount: number; donated: boolean };
+type PlacedBet = { amount: number; odd: number };
 
 // ─── Mapping helpers ───────────────────────────────────────────────────────────
 
@@ -118,7 +121,7 @@ function mapPendingBet(
 
 function mapBet(
   r: DbBet,
-  placedMap: Map<string, number>,
+  placedMap: Map<string, PlacedBet>,
   votedMap: Map<string, "happened" | "not" | "unsure">,
   disputeVotedMap: Map<string, "approve" | "reject">,
   topPlacerMap: Map<string, { userId: string; amount: number }>,
@@ -127,13 +130,14 @@ function mapBet(
   const voted = votedMap.get(r.id);
   return {
     id: r.id, partyId: r.party_id, description: r.description,
-    odd: Number(r.odd),
+    odd: Number(r.current_odd ?? r.odd),
+    initialOdd: Number(r.initial_odd ?? r.odd),
     votesHappened: r.votes_happened, votesNot: r.votes_not,
     resolved: r.resolved as Bet["resolved"],
     placementsCount: r.placements_count ?? 0,
     totalWagered: r.total_wagered ?? 0,
     topPlacer: topPlacerMap.get(r.id),
-    placed: placed !== undefined ? { amount: placed } : undefined,
+    placed,
     voted,
     disputeType: r.dispute_type as Bet["disputeType"],
     disputeNewOdd: r.dispute_new_odd ?? undefined,
@@ -206,7 +210,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const attendedIdsRef = useRef<Set<string>>(new Set());
   const approvedPendingIdsRef = useRef<Set<string>>(new Set());
   const rejectedPendingIdsRef = useRef<Set<string>>(new Set());
-  const placedMapRef = useRef<Map<string, number>>(new Map());
+  const placedMapRef = useRef<Map<string, PlacedBet>>(new Map());
   const votedMapRef = useRef<Map<string, "happened" | "not" | "unsure">>(new Map());
   const disputeVotedMapRef = useRef<Map<string, "approve" | "reject">>(new Map());
   const topPlacerMapRef = useRef<Map<string, { userId: string; amount: number }>>(new Map());
@@ -236,7 +240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.from("pending_bets").select("*").order("created_at", { ascending: false }),
       supabase.from("pending_bet_votes").select("pending_bet_id, vote").eq("user_id", username),
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
-      supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
+      supabase.from("bet_placements").select("bet_id, amount, locked_odd").eq("user_id", username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("esmolas").select("*").order("created_at", { ascending: false }),
@@ -256,8 +260,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .filter((r: { pending_bet_id: string; vote: string }) => r.vote === "reject")
         .map((r: { pending_bet_id: string }) => r.pending_bet_id),
     );
-    const placedMap = new Map<string, number>(
-      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
+    const placedMap = new Map<string, PlacedBet>(
+      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number; locked_odd?: number | null }) => [
+        r.bet_id,
+        { amount: r.amount, odd: Number(r.locked_odd ?? 1.01) },
+      ] as [string, PlacedBet]),
     );
     const votedMap = new Map<string, "happened" | "not" | "unsure">(
       (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not" | "unsure"] as [string, "happened" | "not" | "unsure"]),
@@ -331,13 +338,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshBets = useCallback(async (username: string) => {
     const [betsRes, placementsRes, betVotesRes, disputeVotesRes, allPlacementsRes] = await Promise.all([
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
-      supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
+      supabase.from("bet_placements").select("bet_id, amount, locked_odd").eq("user_id", username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_placements").select("bet_id, user_id, amount"),
     ]);
-    const placedMap = new Map<string, number>(
-      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
+    const placedMap = new Map<string, PlacedBet>(
+      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number; locked_odd?: number | null }) => [
+        r.bet_id,
+        { amount: r.amount, odd: Number(r.locked_odd ?? 1.01) },
+      ] as [string, PlacedBet]),
     );
     const votedMap = new Map<string, "happened" | "not" | "unsure">(
       (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not" | "unsure"] as [string, "happened" | "not" | "unsure"]),
@@ -690,6 +700,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             partyId: promoted.partyId,
             description: promoted.description,
             odd: promoted.odd,
+            initialOdd: promoted.odd,
             votesHappened: 0,
             votesNot: 0,
             placementsCount: 0,
@@ -756,10 +767,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const placeBet = useCallback(
     (betId: string, amount: number) => {
       if (!user) return;
-      placedMapRef.current = new Map([...placedMapRef.current, [betId, amount]]);
-      const currentBet = bets.find((b) => b.id === betId);
-      const currentPlacementsCount = currentBet?.placementsCount ?? 0;
-      const currentTotalWagered = currentBet?.totalWagered ?? 0;
+      const lockedOdd = bets.find((b) => b.id === betId)?.odd ?? 1.01;
+      const placed: PlacedBet = { amount, odd: lockedOdd };
+      placedMapRef.current = new Map([...placedMapRef.current, [betId, placed]]);
       setBets((prev) =>
         prev.map((b) => {
           if (b.id !== betId) return b;
@@ -768,7 +778,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ? { userId: user.name, amount }
               : b.topPlacer;
           topPlacerMapRef.current.set(betId, newTopPlacer);
-          return { ...b, placed: { amount }, placementsCount: b.placementsCount + 1, totalWagered: b.totalWagered + amount, topPlacer: newTopPlacer };
+          return { ...b, placed, placementsCount: b.placementsCount + 1, totalWagered: b.totalWagered + amount, topPlacer: newTopPlacer };
         }),
       );
       const newBetCount = (playerStats[user.name]?.betCount ?? 0) + 1;
@@ -781,17 +791,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .insert({ bet_id: betId, user_id: user.name, amount })
         .then(() => {});
       supabase
-        .from("bets")
-        .update({ placements_count: currentPlacementsCount + 1, total_wagered: currentTotalWagered + amount })
-        .eq("id", betId)
-        .then(() => {});
-      supabase
         .from("users")
         .update({ bet_count: newBetCount })
         .eq("id", user.name)
         .then(() => {});
     },
-    [user, playerStats, balance],
+    [user, playerStats, balance, bets],
   );
 
   const voteBet = useCallback(
@@ -814,7 +819,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (outcome && bet.placed) {
         won = outcome === "happened";
         if (won) {
-          winnings = Math.round(bet.placed.amount * bet.odd);
+          winnings = Math.round(bet.placed.amount * bet.placed.odd);
           const newBal = balance + winnings;
           setBalance(newBal);
           setPlayerStats((s) => ({

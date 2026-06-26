@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Coins, Lock, PartyPopper, Plus } from "lucide-react";
+import { Coins, Lock, PartyPopper, Plus, TrendingDown, TrendingUp } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,10 @@ function parseOddFromDigits(digits: string): number {
 
 function digitsFromNumber(n: number): string {
   return Math.round(n * 100).toString();
+}
+
+function formatMoneyShort(amount: number): string {
+  return `${amount}$`;
 }
 
 // ─── OddsInput component ──────────────────────────────────────────────────────
@@ -95,6 +99,56 @@ function OddsInput({
   );
 }
 
+function DynamicOddBadge({
+  value,
+  initialValue,
+  label,
+  size = "md",
+}: {
+  value: number;
+  initialValue?: number;
+  label?: string;
+  size?: "sm" | "md";
+}) {
+  const previousOddRef = useRef(value);
+  const [direction, setDirection] = useState<"up" | "down" | null>(null);
+
+  useEffect(() => {
+    const previous = previousOddRef.current;
+    if (value === previous) return;
+
+    setDirection(value > previous ? "up" : "down");
+    previousOddRef.current = value;
+
+    const timer = window.setTimeout(() => setDirection(null), 1400);
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
+  const Icon = direction === "up" ? TrendingUp : direction === "down" ? TrendingDown : null;
+  const directionClass =
+    direction === "up"
+      ? "dynamic-odd-badge-up border-green-400/70 bg-green-400/15 text-green-300"
+      : direction === "down"
+        ? "dynamic-odd-badge-down border-[color:var(--neon-red)]/70 bg-[color:var(--neon-red)]/15 text-[color:var(--neon-red)]"
+        : "border-green-400/20 bg-green-400/10 text-green-400";
+  const sizeClass = size === "sm" ? "min-w-[4.8rem] px-2 py-1 text-xs" : "min-w-[5.25rem] px-2.5 py-1.5 text-sm";
+  const iconClass = size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5";
+  const startOdd = initialValue ?? value;
+
+  return (
+    <span
+      className={`dynamic-odd-badge inline-flex shrink-0 items-center justify-between gap-1 rounded-lg border font-black tabular-nums ${sizeClass} ${directionClass}`}
+      aria-live="polite"
+    >
+      <span className="flex min-w-0 flex-col leading-none">
+        <span className="text-[9px] font-bold text-current/70">{label ? `${label} ` : ""}ini {startOdd.toFixed(2)}x</span>
+        <span className="mt-0.5 whitespace-nowrap text-current">agora {value.toFixed(2)}x</span>
+      </span>
+      {Icon && <Icon className={`dynamic-odd-icon ${iconClass}`} />}
+    </span>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function PartyPage() {
@@ -102,7 +156,39 @@ function PartyPage() {
   const { parties, pending, bets, votePending, suggestBet, requestDispute, voteDispute } = useApp();
   const party = parties.find((p) => p.id === partyId);
   const [suggestOpen, setSuggestOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("pending");
+  const [activeTab, setActiveTab] = useState("live");
+
+  const partyPending = pending.filter((p) => p.partyId === partyId);
+  const partyBets = bets.filter((b) => b.partyId === partyId);
+
+  // Disputed live bets go to Pendentes while under vote
+  const disputedPending = partyBets.filter((b) => b.disputeStatus === "pending");
+  const livePartyBets = partyBets.filter((b) => b.disputeStatus !== "pending");
+  const sortedLivePartyBets = [...livePartyBets].sort((a, b) => {
+    const aPlaced = a.placed ? 1 : 0;
+    const bPlaced = b.placed ? 1 : 0;
+    if (aPlaced !== bPlaced) return bPlaced - aPlaced;
+    if (a.placementsCount !== b.placementsCount) return b.placementsCount - a.placementsCount;
+    return b.totalWagered - a.totalWagered;
+  });
+
+  // Lock Ao Vivo if there are unvoted regular pending OR unvoted disputes
+  const hasUnvotedPending =
+    partyPending.some((p) => !p.approvedByMe && !p.rejectedByMe) ||
+    disputedPending.some((b) => !b.disputeVotedByMe);
+
+  useEffect(() => {
+    setActiveTab("live");
+  }, [partyId]);
+
+  useEffect(() => {
+    if (hasUnvotedPending) {
+      setActiveTab("pending");
+      return;
+    }
+
+    setActiveTab((current) => (current === "pending" ? "live" : current));
+  }, [hasUnvotedPending]);
 
   if (!party) {
     return (
@@ -114,17 +200,6 @@ function PartyPage() {
 
   const startDate = new Date(party.start);
   const ended = isEnded(party);
-  const partyPending = pending.filter((p) => p.partyId === partyId);
-  const partyBets = bets.filter((b) => b.partyId === partyId);
-
-  // Disputed live bets go to Pendentes while under vote
-  const disputedPending = partyBets.filter((b) => b.disputeStatus === "pending");
-  const livePartyBets = partyBets.filter((b) => b.disputeStatus !== "pending");
-
-  // Lock Ao Vivo if there are unvoted regular pending OR unvoted disputes
-  const hasUnvotedPending =
-    partyPending.some((p) => !p.approvedByMe && !p.rejectedByMe) ||
-    disputedPending.some((b) => !b.disputeVotedByMe);
 
   // Sort: unvoted first, voted-rejected last
   const sortedPartyPending = [...partyPending].sort((a, b) => {
@@ -225,11 +300,9 @@ function PartyPage() {
               <>
                 {livePartyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
                 <TopBetBanner bets={livePartyBets} />
-                {[...livePartyBets]
-                  .sort((a, b) => b.placementsCount - a.placementsCount)
-                  .map((b) => (
+                {sortedLivePartyBets.map((b) => (
                     <BetCard key={b.id} bet={b} onRequestDispute={requestDispute} onVoteDispute={voteDispute} />
-                  ))}
+                ))}
               </>
             )}
           </TabsContent>
@@ -247,7 +320,7 @@ function PartyPage() {
               </div>
             )}
             {livePartyBets.length === 0 && <Empty msg="Nada pra votar ainda." />}
-            {livePartyBets.map((b) => (
+            {sortedLivePartyBets.map((b) => (
               <VoteCard key={b.id} bet={b} />
             ))}
           </TabsContent>
@@ -345,7 +418,7 @@ function TopBetBanner({ bets }: { bets: Bet[] }) {
       <span className="text-xl">🔥</span>
       <p className="text-sm leading-snug text-[color:var(--neon-green)]">
         <span className="font-black">{top.userId}</span> apostou{" "}
-        <span className="font-black tabular-nums">{top.amount}c</span> em{" "}
+        <span className="font-black tabular-nums">{formatMoneyShort(top.amount)}</span> em{" "}
         <span className="font-bold italic">"{top.bet.description}"</span>
       </p>
     </div>
@@ -435,27 +508,37 @@ function BetCard({
   const disputeRejected = bet.disputeStatus === "rejected";
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-card p-3">
+    <div
+      className={
+        "rounded-2xl border bg-card p-3 transition " +
+        (bet.placed ? "border-green-400/55 shadow-[0_0_0_1px_rgba(74,222,128,0.18)]" : "border-border/60")
+      }
+    >
       {/* Description */}
+      {bet.placed && (
+        <div className="mb-2 inline-flex rounded-full bg-green-400/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-green-400">
+          Minha aposta
+        </div>
+      )}
       <p className="line-clamp-2 text-sm font-bold leading-snug">{bet.description}</p>
 
       {/* ODD + action + dispute button row */}
       <div className="mt-2 flex items-center gap-2">
-        <span className="shrink-0 rounded-lg bg-green-400/10 px-2.5 py-1.5 text-sm font-black tabular-nums text-green-400">
-          {bet.odd.toFixed(2)}x
-        </span>
+        <DynamicOddBadge value={bet.odd} initialValue={bet.initialOdd} />
         {bet.placementsCount > 0 && (
           <span className="shrink-0 rounded-lg bg-zinc-800/60 px-2 py-1 text-[11px] font-bold tabular-nums text-muted-foreground">
-            {bet.placementsCount}🧑 · {bet.totalWagered}c
+            {bet.placementsCount}🧑 · {formatMoneyShort(bet.totalWagered)}
           </span>
         )}
 
         {bet.placed ? (
           <span className="flex-1 truncate text-xs text-muted-foreground">
-            ✓ <span className="font-black text-green-400">{bet.placed.amount}c</span>
-            {" → "}
+            ✓ <span className="font-black text-green-400">{formatMoneyShort(bet.placed.amount)}</span>
+            {" @ "}
+            <span className="font-black text-green-400">{bet.placed.odd.toFixed(2)}x</span>
+            {" -> "}
             <span className="font-black text-green-400">
-              {(bet.placed.amount * bet.odd).toFixed(0)}c
+              {formatMoneyShort(Number((bet.placed.amount * bet.placed.odd).toFixed(0)))}
             </span>
           </span>
         ) : (
@@ -551,7 +634,7 @@ function VoteCard({ bet }: { bet: Bet }) {
     <div className={"rounded-2xl border border-border/60 bg-card p-4 transition " + (resolved ? "opacity-60" : "")}>
       <p className="text-base font-bold leading-snug">{bet.description}</p>
       <div className="mt-1 flex items-center gap-1">
-        <span className="text-xs font-bold text-green-400">ODD {bet.odd.toFixed(2)}x</span>
+        <DynamicOddBadge value={bet.odd} initialValue={bet.initialOdd} label="ODD" size="sm" />
       </div>
 
       <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
@@ -698,7 +781,7 @@ function SuggestDialog({
   onSuggest: (desc: string, odd: number) => void;
 }) {
   const [desc, setDesc] = useState("");
-  const [odd, setOdd] = useState(1.8);
+  const [odd, setOdd] = useState(2.0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -5,7 +5,8 @@ export type Bet = {
   partyId: string;
   description: string;
   odd: number;
-  placed?: { amount: number };
+  initialOdd: number;
+  placed?: { amount: number; odd: number };
   voted?: "happened" | "not" | "unsure";
   votesHappened: number;
   votesNot: number;

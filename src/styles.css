@@ -143,3 +143,134 @@ body {
 @utility animate-pulse-glow {
   animation: pulse-glow 1.8s ease-in-out infinite;
 }
+
+.dynamic-odd-badge {
+  position: relative;
+  overflow: hidden;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.dynamic-odd-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dynamic-odd-badge-up {
+  animation: odd-badge-up 1.35s ease-out;
+}
+
+.dynamic-odd-badge-down {
+  animation: odd-badge-down 1.35s ease-out;
+}
+
+.dynamic-odd-badge-up::after {
+  animation: odd-flash-up 1.35s ease-out;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--neon-green) 45%, transparent),
+    transparent
+  );
+}
+
+.dynamic-odd-badge-down::after {
+  animation: odd-flash-down 1.35s ease-out;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--neon-red) 45%, transparent),
+    transparent
+  );
+}
+
+.dynamic-odd-icon {
+  animation: odd-icon-pop 1.35s ease-out;
+}
+
+@keyframes odd-badge-up {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--neon-green) 50%, transparent);
+    transform: translateY(0) scale(1);
+  }
+  28% {
+    box-shadow: 0 0 0 9px color-mix(in oklab, var(--neon-green) 0%, transparent);
+    transform: translateY(-2px) scale(1.08);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes odd-badge-down {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--neon-red) 50%, transparent);
+    transform: translateY(0) scale(1);
+  }
+  28% {
+    box-shadow: 0 0 0 9px color-mix(in oklab, var(--neon-red) 0%, transparent);
+    transform: translateY(2px) scale(1.08);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes odd-flash-up {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  24% {
+    opacity: 0.85;
+  }
+  62% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes odd-flash-down {
+  0% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  24% {
+    opacity: 0.85;
+  }
+  62% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes odd-icon-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

@@ -72,12 +72,17 @@ function HomePage() {
               <p className="text-xs font-black text-green-400">ODD 1.2</p>
             </div>
           </div>
-          <div className="mt-3 flex items-center gap-3 rounded-xl bg-green-500 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-black uppercase tracking-widest text-green-950">Seu saldo</p>
-              <p className="text-4xl font-black tabular-nums leading-none text-white">{balance}</p>
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-green-500 px-3.5 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-widest text-green-950">Seu saldo</p>
+              <p className="text-2xl font-black tabular-nums leading-none text-white">{balance}</p>
             </div>
-            <span className="text-base font-black text-green-950">conto</span>
+            <span className="text-xs font-black uppercase tracking-wider text-green-950">conto</span>
+          </div>
+          <div className="mt-3 rounded-xl border border-white/15 bg-black/25 px-3 py-2">
+            <p className="text-[11px] font-bold leading-snug text-white/85">
+              As odds atualizam automaticamente conforme a galera coloca dinheiro ou deixa a aposta parada.
+            </p>
           </div>
         </section>
 
