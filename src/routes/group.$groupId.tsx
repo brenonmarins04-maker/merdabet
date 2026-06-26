@@ -281,11 +281,9 @@ function PartyCard({
                 <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-green)]">
                   {b.description}
                 </p>
-                <div className="shrink-0 flex gap-1.5 text-[10px] font-black tabular-nums">
-                  <span className="text-green-400">{b.oddFor.toFixed(2)}x</span>
-                  <span className="text-muted-foreground">/</span>
-                  <span className="text-[color:var(--neon-red)]">{b.oddAgainst.toFixed(2)}x</span>
-                </div>
+                <span className="shrink-0 text-[10px] font-black tabular-nums text-green-400">
+                  {b.odd.toFixed(2)}x
+                </span>
               </div>
             ))}
           </div>

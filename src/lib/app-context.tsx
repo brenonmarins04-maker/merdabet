@@ -93,10 +93,10 @@ type Ctx = {
 
   pending: PendingBet[];
   votePending: (id: string, vote: "approve" | "reject") => void;
-  suggestBet: (partyId: string, description: string, oddFor: number, oddAgainst: number) => void;
+  suggestBet: (partyId: string, description: string, odd: number) => void;
 
   bets: Bet[];
-  placeBet: (betId: string, side: "for" | "against", amount: number) => void;
+  placeBet: (betId: string, amount: number) => void;
   voteBet: (betId: string, vote: "happened" | "not") => VoteBetResult;
 
   playerStats: Record<string, PlayerStats>;
@@ -267,8 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             id: `b${Date.now()}`,
             partyId: promoted.partyId,
             description: promoted.description,
-            oddFor: promoted.oddFor,
-            oddAgainst: promoted.oddAgainst,
+            odd: promoted.odd,
             votesHappened: 0,
             votesNot: 0,
           },
@@ -281,7 +280,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const suggestBet = useCallback(
-    (partyId: string, description: string, oddFor: number, oddAgainst: number) => {
+    (partyId: string, description: string, odd: number) => {
       const party = parties.find((p) => p.id === partyId);
       const attendees = party?.attendees ?? 0;
       const needed = Math.max(1, Math.ceil(attendees / 3));
@@ -289,8 +288,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: `pb${Date.now()}`,
         partyId,
         description,
-        oddFor,
-        oddAgainst,
+        odd,
         approvals: 0,
         needed,
       };
@@ -302,9 +300,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ─── Live bets ───────────────────────────────────────────────────────────────
 
   const placeBet = useCallback(
-    (betId: string, side: "for" | "against", amount: number) => {
+    (betId: string, amount: number) => {
       setBets((bs) =>
-        bs.map((b) => (b.id === betId ? { ...b, placed: { side, amount } } : b)),
+        bs.map((b) => (b.id === betId ? { ...b, placed: { amount } } : b)),
       );
       if (user) {
         setPlayerStats((s) => ({
@@ -337,13 +335,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let winnings = 0;
 
       if (outcome && bet.placed) {
-        won =
-          (outcome === "happened" && bet.placed.side === "for") ||
-          (outcome === "not" && bet.placed.side === "against");
+        won = outcome === "happened";
         if (won) {
-          winnings = Math.round(
-            bet.placed.amount * (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst),
-          );
+          winnings = Math.round(bet.placed.amount * bet.odd);
           setBalance((b) => {
             const newBal = b + winnings;
             if (user) {

@@ -4,9 +4,8 @@ export type Bet = {
   id: string;
   partyId: string;
   description: string;
-  oddFor: number;
-  oddAgainst: number;
-  placed?: { side: "for" | "against"; amount: number };
+  odd: number;
+  placed?: { amount: number };
   voted?: "happened" | "not";
   votesHappened: number;
   votesNot: number;
@@ -17,8 +16,7 @@ export type PendingBet = {
   id: string;
   partyId: string;
   description: string;
-  oddFor: number;
-  oddAgainst: number;
+  odd: number;
   approvals: number;
   needed: number;
   approvedByMe?: boolean;
