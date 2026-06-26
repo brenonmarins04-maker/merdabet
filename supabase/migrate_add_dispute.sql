@@ -25,3 +25,9 @@ CREATE TABLE IF NOT EXISTS bet_dispute_votes (
 );
 
 ALTER TABLE bet_dispute_votes DISABLE ROW LEVEL SECURITY;
+
+-- 4. Backfill placements_count and total_wagered from existing bet_placements rows
+--    (needed if bets were placed before these columns were added)
+UPDATE bets SET
+  placements_count = (SELECT COUNT(*)           FROM bet_placements WHERE bet_id = bets.id),
+  total_wagered    = (SELECT COALESCE(SUM(amount), 0) FROM bet_placements WHERE bet_id = bets.id);

@@ -60,10 +60,7 @@ function HomePage() {
               </span>
             </div>
           )}
-          <p className="text-xs font-bold uppercase tracking-widest text-white/70">
-            Pense · Faça a ODD · Aposte
-          </p>
-          <h2 className="mt-2 text-2xl font-black leading-tight text-white">
+          <h2 className="text-2xl font-black leading-tight text-white">
             Aposte nas merdas que vão acontecer nas festas 🍻
           </h2>
           <div className="mt-4 flex items-center gap-3 rounded-xl bg-black/30 px-4 py-3">
@@ -286,6 +283,7 @@ function RankingSection({ playerStats }: { playerStats: Record<string, PlayerSta
     .slice(0, 3);
 
   const topRicos = [...entries]
+    .filter(([, stats]) => stats.betCount >= 2)
     .sort((a, b) => b[1].balance - a[1].balance)
     .slice(0, 3);
 
