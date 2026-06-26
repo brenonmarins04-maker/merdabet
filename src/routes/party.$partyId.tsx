@@ -59,26 +59,36 @@ function OddsInput({
   colorClass?: string;
 }) {
   const [digits, setDigits] = useState(() => digitsFromNumber(value));
+  const [replaceOnNextDigit, setReplaceOnNextDigit] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const input = inputRef.current;
+    const allSelected =
+      input !== null &&
+      input.selectionStart === 0 &&
+      input.selectionEnd === input.value.length;
+
     if (e.key >= "0" && e.key <= "9") {
       e.preventDefault();
-      const next = digits + e.key;
+      const next = replaceOnNextDigit || allSelected ? e.key : digits + e.key;
       if (next.length > 4) return;
       const intPart = next.length <= 2 ? parseInt(next) : parseInt(next.slice(0, next.length - 2));
       if (intPart > 99) return;
+      setReplaceOnNextDigit(false);
       setDigits(next);
       onChange(parseOddFromDigits(next));
     } else if (e.key === "Backspace") {
       e.preventDefault();
-      const next = digits.slice(0, -1);
+      const next = replaceOnNextDigit || allSelected ? "" : digits.slice(0, -1);
+      setReplaceOnNextDigit(false);
       setDigits(next);
       onChange(parseOddFromDigits(next));
     }
   }
 
   function handleFocus() {
+    setReplaceOnNextDigit(true);
     setTimeout(() => inputRef.current?.select(), 0);
   }
 
@@ -93,6 +103,7 @@ function OddsInput({
         onChange={() => {}}
         onKeyDown={handleKeyDown}
         onFocus={handleFocus}
+        onBlur={() => setReplaceOnNextDigit(false)}
         className={`mt-1 h-12 w-full rounded-md border border-input bg-background px-3 text-center text-xl font-black tabular-nums outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 ${colorClass}`}
       />
     </div>
