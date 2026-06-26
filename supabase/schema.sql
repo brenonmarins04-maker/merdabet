@@ -414,7 +414,9 @@ execute function public.recalculate_dynamic_odd_after_placement_insert();
 -- ─── Realtime: enable on key tables ──────────────────────────────────────────
 alter publication supabase_realtime add table users;
 alter publication supabase_realtime add table groups;
+alter publication supabase_realtime add table group_members;
 alter publication supabase_realtime add table parties;
 alter publication supabase_realtime add table pending_bets;
 alter publication supabase_realtime add table bets;
+alter publication supabase_realtime add table bet_placements;
 alter publication supabase_realtime add table esmolas;

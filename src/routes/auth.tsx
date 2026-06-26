@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,12 +24,16 @@ function sanitizeUsername(raw: string) {
 }
 
 function AuthPage() {
-  const { login } = useApp();
+  const { authReady, user, login } = useApp();
   const navigate = useNavigate();
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const [usernameErr, setUsernameErr] = useState("");
   const [passwordErr, setPasswordErr] = useState("");
+
+  useEffect(() => {
+    if (authReady && user) navigate({ to: "/" });
+  }, [authReady, user, navigate]);
 
   function handleUsernameChange(raw: string) {
     const clean = sanitizeUsername(raw);

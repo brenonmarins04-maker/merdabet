@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useApp, type PlayerStats } from "@/lib/app-context";
+import { useApp, type GroupMemberInsight, type PlayerStats } from "@/lib/app-context";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -26,19 +26,20 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
-  const { user, balance, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup, logout, playerStats } = useApp();
+  const { user, authReady, balance, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup, logout, playerStats } = useApp();
   const totalUsers = Object.keys(playerStats).length;
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [joinDialogId, setJoinDialogId] = useState<string | null>(null);
   const [settingsGroupId, setSettingsGroupId] = useState<string | null>(null);
+  const [membersGroupId, setMembersGroupId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) navigate({ to: "/auth" });
-  }, [user, navigate]);
+    if (authReady && !user) navigate({ to: "/auth" });
+  }, [authReady, user, navigate]);
 
-  if (!user) return null;
+  if (!authReady || !user) return null;
 
   return (
     <div className="min-h-dvh bg-background pb-24">
@@ -158,6 +159,13 @@ function HomePage() {
                         ⚙️
                       </button>
                     )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMembersGroupId(g.id); }}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-muted"
+                      title="Integrantes do grupo"
+                    >
+                      👥
+                    </button>
                     <span className={`flex h-10 items-center rounded-lg px-4 text-sm font-bold ${joined ? "bg-primary text-primary-foreground" : "border border-border/60 text-muted-foreground"}`}>
                       {joined ? "Abrir →" : "Entrar"}
                     </span>
@@ -194,6 +202,12 @@ function HomePage() {
           toast.success("Entrou no grupo!");
           navigate({ to: "/group/$groupId", params: { groupId: id } });
         }}
+      />
+
+      <GroupMembersDialog
+        group={groups.find((g) => g.id === membersGroupId) ?? null}
+        canSeeMoney={groups.find((g) => g.id === membersGroupId)?.createdBy === user.name}
+        onClose={() => setMembersGroupId(null)}
       />
 
       <GroupSettingsDialog
@@ -344,6 +358,105 @@ function RankingSection({ playerStats }: { playerStats: Record<string, PlayerSta
         )}
       </div>
     </section>
+  );
+}
+
+function formatMoneyShort(amount: number): string {
+  return `${amount}$`;
+}
+
+function initials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
+}
+
+function rankLabel(index: number): string {
+  return `${index + 1}º`;
+}
+
+function GroupMembersDialog({
+  group,
+  canSeeMoney,
+  onClose,
+}: {
+  group: { id: string; name: string } | null;
+  canSeeMoney: boolean;
+  onClose: () => void;
+}) {
+  const { getGroupMemberInsights } = useApp();
+  const members: GroupMemberInsight[] = group ? getGroupMemberInsights(group.id) : [];
+
+  return (
+    <Dialog open={!!group} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85dvh] overflow-hidden p-4">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span>👥</span>
+            Ranking da volta
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            {group?.name}
+            {canSeeMoney ? " · ordenado por maior retorno potencial" : ""}
+          </p>
+        </DialogHeader>
+
+        {members.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
+            Ninguém entrou nesse grupo ainda.
+          </div>
+        ) : (
+          <div className="max-h-[62dvh] space-y-2 overflow-y-auto pr-1">
+            {members.map((member, index) => (
+              <div
+                key={member.userId}
+                className="rounded-xl border border-border/60 bg-card p-3"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-12 shrink-0 flex-col items-center justify-center rounded-lg bg-green-400/10 text-green-400">
+                    <span className="text-sm font-black leading-none tabular-nums">{rankLabel(index)}</span>
+                    <span className="mt-0.5 text-[8px] font-black uppercase leading-none">lugar</span>
+                  </div>
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/20 text-xs font-black text-primary">
+                    {initials(member.userId)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-black">{member.userId}</p>
+                      {canSeeMoney && index === 0 && member.potentialReturn > 0 && (
+                        <span className="rounded-full bg-green-400/15 px-2 py-0.5 text-[10px] font-black uppercase text-green-400">
+                          maior volta
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {canSeeMoney
+                        ? `${member.activeBets} ativa${member.activeBets !== 1 ? "s" : ""} no grupo`
+                        : `${member.betCount} aposta${member.betCount !== 1 ? "s" : ""} no site`}
+                    </p>
+                  </div>
+                </div>
+
+                {canSeeMoney && (
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg bg-background/70 px-2 py-2">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">saldo</p>
+                      <p className="text-xs font-black tabular-nums text-green-400">{formatMoneyShort(member.balance)}</p>
+                    </div>
+                    <div className="rounded-lg bg-background/70 px-2 py-2">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">apostado</p>
+                      <p className="text-xs font-black tabular-nums text-[color:var(--coin)]">{formatMoneyShort(member.activeStake)}</p>
+                    </div>
+                    <div className="rounded-lg bg-green-400/10 px-2 py-2">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">volta</p>
+                      <p className="text-xs font-black tabular-nums text-green-400">{formatMoneyShort(member.potentialReturn)}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

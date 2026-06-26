@@ -21,6 +21,15 @@ type User = { name: string } | null;
 
 export type PlayerStats = { balance: number; betCount: number };
 
+export type GroupMemberInsight = {
+  userId: string;
+  balance: number;
+  betCount: number;
+  activeBets: number;
+  activeStake: number;
+  potentialReturn: number;
+};
+
 export type VoteBetResult = {
   resolved: boolean;
   outcome?: "happened" | "not";
@@ -32,7 +41,7 @@ export type VoteBetResult = {
 // ─── Session (localStorage: only username + expiry) ───────────────────────────
 
 const SESSION_KEY = "merdabet_session_v2";
-const SESSION_TTL = 10 * 60 * 1000;
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
 
 type SessionData = { username: string; expiry: number };
 
@@ -89,6 +98,9 @@ type DbBet = {
 };
 type DbEsmola = { id: string; group_id: string; user_id: string; amount: number; donated: boolean };
 type PlacedBet = { amount: number; odd: number };
+type DbGroupMember = { group_id: string; user_id: string };
+type DbBetPlacement = { bet_id: string; user_id: string; amount: number; locked_odd?: number | null };
+type BetPlacement = { betId: string; userId: string; amount: number; odd: number };
 
 // ─── Mapping helpers ───────────────────────────────────────────────────────────
 
@@ -153,10 +165,35 @@ function mapEsmola(r: DbEsmola): Esmola {
   return { id: r.id, groupId: r.group_id, user: r.user_id, amount: r.amount, donated: r.donated };
 }
 
+function mapBetPlacement(r: DbBetPlacement): BetPlacement {
+  return {
+    betId: r.bet_id,
+    userId: r.user_id,
+    amount: r.amount,
+    odd: Number(r.locked_odd ?? 1.01),
+  };
+}
+
+function groupMembersByGroup(rows: DbGroupMember[]): Record<string, string[]> {
+  const byGroup: Record<string, Set<string>> = {};
+  for (const row of rows) {
+    byGroup[row.group_id] ??= new Set<string>();
+    byGroup[row.group_id].add(row.user_id);
+  }
+
+  return Object.fromEntries(
+    Object.entries(byGroup).map(([groupId, members]) => [
+      groupId,
+      [...members].sort((a, b) => a.localeCompare(b)),
+    ]),
+  );
+}
+
 // ─── Context types ─────────────────────────────────────────────────────────────
 
 type Ctx = {
   user: User;
+  authReady: boolean;
   balance: number;
   login: (name: string, password: string) => Promise<string | null>;
   logout: () => void;
@@ -185,6 +222,7 @@ type Ctx = {
   voteDispute: (betId: string, vote: "approve" | "reject") => void;
 
   playerStats: Record<string, PlayerStats>;
+  getGroupMemberInsights: (groupId: string) => GroupMemberInsight[];
 
   esmolas: Esmola[];
   requestEsmola: (groupId: string, amount: number) => void;
@@ -197,6 +235,7 @@ const AppContext = createContext<Ctx | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [balance, setBalance] = useState<number>(0);
   const [groups, setGroups] = useState<Group[]>([]);
   const [joinedGroupIds, setJoined] = useState<string[]>([]);
@@ -205,6 +244,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [bets, setBets] = useState<Bet[]>([]);
   const [esmolas, setEsmolas] = useState<Esmola[]>([]);
   const [playerStats, setPlayerStats] = useState<Record<string, PlayerStats>>({});
+  const [groupMembers, setGroupMembers] = useState<Record<string, string[]>>({});
+  const [allPlacements, setAllPlacements] = useState<BetPlacement[]>([]);
 
   // Per-user junction data (stable refs, updated on load/subscription)
   const attendedIdsRef = useRef<Set<string>>(new Set());
@@ -231,6 +272,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       disputeVotesRes,
       esmolasRes,
       usersRes,
+      groupMembersRes,
       allPlacementsRes,
     ] = await Promise.all([
       supabase.from("groups").select("*").order("created_at", { ascending: false }),
@@ -245,7 +287,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("esmolas").select("*").order("created_at", { ascending: false }),
       supabase.from("users").select("id, balance, bet_count"),
-      supabase.from("bet_placements").select("bet_id, user_id, amount"),
+      supabase.from("group_members").select("group_id, user_id"),
+      supabase.from("bet_placements").select("bet_id, user_id, amount, locked_odd"),
     ]);
 
     // Build per-user sets/maps
@@ -274,7 +317,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     const topPlacerMap = new Map<string, { userId: string; amount: number }>();
-    for (const p of (allPlacementsRes.data ?? []) as { bet_id: string; user_id: string; amount: number }[]) {
+    for (const p of (allPlacementsRes.data ?? []) as DbBetPlacement[]) {
       const cur = topPlacerMap.get(p.bet_id);
       if (!cur || p.amount > cur.amount) topPlacerMap.set(p.bet_id, { userId: p.user_id, amount: p.amount });
     }
@@ -293,6 +336,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPending((pendingRes.data ?? []).map((r: DbPendingBet) => mapPendingBet(r, approvedIds, rejectedIds)));
     setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap, topPlacerMap)));
     setEsmolas((esmolasRes.data ?? []).map(mapEsmola));
+    setGroupMembers(groupMembersByGroup((groupMembersRes.data ?? []) as DbGroupMember[]));
+    setAllPlacements(((allPlacementsRes.data ?? []) as DbBetPlacement[]).map(mapBetPlacement));
 
     const stats: Record<string, PlayerStats> = {};
     for (const u of (usersRes.data ?? []) as DbUser[]) {
@@ -341,7 +386,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.from("bet_placements").select("bet_id, amount, locked_odd").eq("user_id", username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
-      supabase.from("bet_placements").select("bet_id, user_id, amount"),
+      supabase.from("bet_placements").select("bet_id, user_id, amount, locked_odd"),
     ]);
     const placedMap = new Map<string, PlacedBet>(
       (placementsRes.data ?? []).map((r: { bet_id: string; amount: number; locked_odd?: number | null }) => [
@@ -356,7 +401,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
     );
     const topPlacerMap = new Map<string, { userId: string; amount: number }>();
-    for (const p of (allPlacementsRes.data ?? []) as { bet_id: string; user_id: string; amount: number }[]) {
+    for (const p of (allPlacementsRes.data ?? []) as DbBetPlacement[]) {
       const cur = topPlacerMap.get(p.bet_id);
       if (!cur || p.amount > cur.amount) topPlacerMap.set(p.bet_id, { userId: p.user_id, amount: p.amount });
     }
@@ -364,7 +409,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     votedMapRef.current = votedMap;
     disputeVotedMapRef.current = disputeVotedMap;
     topPlacerMapRef.current = topPlacerMap;
+    setAllPlacements(((allPlacementsRes.data ?? []) as DbBetPlacement[]).map(mapBetPlacement));
     setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap, topPlacerMap)));
+  }, []);
+
+  const refreshGroupMembers = useCallback(async () => {
+    const { data } = await supabase.from("group_members").select("group_id, user_id");
+    setGroupMembers(groupMembersByGroup((data ?? []) as DbGroupMember[]));
   }, []);
 
   const refreshPlayerStats = useCallback(async () => {
@@ -382,7 +433,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const session = loadSession();
     if (session) {
       setUser({ name: session.username });
+      saveSession(session.username);
     }
+    setAuthReady(true);
   }, []);
 
   // ─── Load data when user logs in ──────────────────────────────────────────────
@@ -413,6 +466,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const g = mapGroup(payload.new as DbGroup);
           setGroups((prev) => prev.map((x) => (x.id === g.id ? g : x)));
         }
+        refreshGroupMembers();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_members" }, () => {
+        refreshGroupMembers();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "parties" }, () => {
         refreshParties(username);
@@ -421,6 +478,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshPending(username);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "bets" }, () => {
+        refreshBets(username);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "bet_placements" }, () => {
         refreshBets(username);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "esmolas" }, () => {
@@ -449,7 +509,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, refreshParties, refreshPending, refreshBets, refreshPlayerStats]);
+  }, [user, refreshGroupMembers, refreshParties, refreshPending, refreshBets, refreshPlayerStats]);
 
   // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -490,6 +550,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBets([]);
     setEsmolas([]);
     setPlayerStats({});
+    setGroupMembers({});
+    setAllPlacements([]);
     clearSession();
   }, []);
 
@@ -530,6 +592,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       setGroups((prev) => [g, ...prev]);
       setJoined((prev) => [g.id, ...prev]);
+      if (user) {
+        setGroupMembers((prev) => ({
+          ...prev,
+          [g.id]: [user.name],
+        }));
+      }
       supabase
         .from("groups")
         .insert({ id: g.id, name: g.name, password: g.password, created_by: g.createdBy, members: 1 })
@@ -548,6 +616,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!user) return;
       if (joinedGroupIds.includes(id)) return;
       setJoined((prev) => [...prev, id]);
+      setGroupMembers((prev) => {
+        const members = new Set(prev[id] ?? []);
+        members.add(user.name);
+        return { ...prev, [id]: [...members].sort((a, b) => a.localeCompare(b)) };
+      });
       const currentMembers = groups.find((g) => g.id === id)?.members ?? 0;
       const newMembers = currentMembers + 1;
       const newNeeded = Math.max(1, Math.ceil(newMembers / 3));
@@ -583,6 +656,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setGroups((prev) => prev.filter((g) => g.id !== id));
       setJoined((prev) => prev.filter((x) => x !== id));
       setParties((prev) => prev.filter((p) => p.groupId !== id));
+      setGroupMembers((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       supabase.from("groups").delete().eq("id", id).then(() => {});
     },
     [],
@@ -770,6 +848,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const lockedOdd = bets.find((b) => b.id === betId)?.odd ?? 1.01;
       const placed: PlacedBet = { amount, odd: lockedOdd };
       placedMapRef.current = new Map([...placedMapRef.current, [betId, placed]]);
+      setAllPlacements((prev) => [
+        ...prev.filter((placement) => !(placement.betId === betId && placement.userId === user.name)),
+        { betId, userId: user.name, amount, odd: lockedOdd },
+      ]);
       setBets((prev) =>
         prev.map((b) => {
           if (b.id !== betId) return b;
@@ -983,25 +1065,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     supabase.from("esmolas").update({ donated: true }).eq("id", id).then(() => {});
   }, []);
 
+  const getGroupMemberInsights = useCallback(
+    (groupId: string): GroupMemberInsight[] => {
+      const group = groups.find((g) => g.id === groupId);
+      const memberIds = new Set(groupMembers[groupId] ?? []);
+      if (group?.createdBy) memberIds.add(group.createdBy);
+
+      const partyIds = new Set(
+        parties
+          .filter((party) => party.groupId === groupId)
+          .map((party) => party.id),
+      );
+      const activeBets = new Map(
+        bets
+          .filter((bet) => partyIds.has(bet.partyId) && !bet.resolved)
+          .map((bet) => [bet.id, bet]),
+      );
+      const totals = new Map<string, { activeBets: number; activeStake: number; potentialReturn: number }>();
+
+      for (const placement of allPlacements) {
+        if (!activeBets.has(placement.betId)) continue;
+        const current = totals.get(placement.userId) ?? {
+          activeBets: 0,
+          activeStake: 0,
+          potentialReturn: 0,
+        };
+        current.activeBets += 1;
+        current.activeStake += placement.amount;
+        current.potentialReturn += Math.round(placement.amount * placement.odd);
+        totals.set(placement.userId, current);
+        memberIds.add(placement.userId);
+      }
+
+      return [...memberIds]
+        .map((userId) => {
+          const total = totals.get(userId);
+          const stats = playerStats[userId];
+          return {
+            userId,
+            balance: stats?.balance ?? 0,
+            betCount: stats?.betCount ?? 0,
+            activeBets: total?.activeBets ?? 0,
+            activeStake: total?.activeStake ?? 0,
+            potentialReturn: total?.potentialReturn ?? 0,
+          };
+        })
+        .sort((a, b) => {
+          if (b.potentialReturn !== a.potentialReturn) return b.potentialReturn - a.potentialReturn;
+          if (b.balance !== a.balance) return b.balance - a.balance;
+          return a.userId.localeCompare(b.userId);
+        });
+    },
+    [allPlacements, bets, groupMembers, groups, parties, playerStats],
+  );
+
   // ─── Context value ────────────────────────────────────────────────────────────
 
   const value = useMemo<Ctx>(
     () => ({
-      user, balance, login, logout, addBalance, spend,
+      user, authReady, balance, login, logout, addBalance, spend,
       groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
       bets, placeBet, voteBet, requestDispute, voteDispute,
-      playerStats,
+      playerStats, getGroupMemberInsights,
       esmolas, requestEsmola, donateEsmola,
     }),
     [
-      user, balance, login, logout, addBalance, spend,
+      user, authReady, balance, login, logout, addBalance, spend,
       groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
       bets, placeBet, voteBet, requestDispute, voteDispute,
-      playerStats,
+      playerStats, getGroupMemberInsights,
       esmolas, requestEsmola, donateEsmola,
     ],
   );
