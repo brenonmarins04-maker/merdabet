@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { LogOut, PartyPopper, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
+import { LogOut, PartyPopper, Plus, Search, Users } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,13 +26,12 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
-  const { user, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup, logout, playerStats } = useApp();
+  const { user, balance, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup, logout, playerStats } = useApp();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [joinDialogId, setJoinDialogId] = useState<string | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  const [settingsGroupId, setSettingsGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) navigate({ to: "/auth" });
@@ -63,6 +62,13 @@ function HomePage() {
               </p>
               <p className="text-xs font-black text-green-400">ODD 1.2</p>
             </div>
+          </div>
+          <div className="mt-3 flex items-center gap-3 rounded-xl bg-green-500 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-black uppercase tracking-widest text-green-950">Seu saldo</p>
+              <p className="text-4xl font-black tabular-nums leading-none text-white">{balance}</p>
+            </div>
+            <span className="text-base font-black text-green-950">conto</span>
           </div>
         </section>
 
@@ -109,7 +115,11 @@ function HomePage() {
               return (
                 <li
                   key={g.id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card p-4"
+                  className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card p-4 transition hover:border-primary/60"
+                  onClick={() => {
+                    if (joined) navigate({ to: "/group/$groupId", params: { groupId: g.id } });
+                    else setJoinDialogId(g.id);
+                  }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -126,40 +136,17 @@ function HomePage() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {isOwner && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-9 w-9 p-0 text-muted-foreground hover:text-primary"
-                          onClick={() => setEditGroupId(g.id)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-9 w-9 p-0 text-muted-foreground hover:text-red-400"
-                          onClick={() => setDeleteConfirmId(g.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                    {joined ? (
-                      <Button asChild size="sm" className="h-10 px-4 font-bold">
-                        <Link to="/group/$groupId" params={{ groupId: g.id }}>
-                          Abrir
-                        </Link>
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        className="h-10 px-4 font-bold"
-                        onClick={() => setJoinDialogId(g.id)}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSettingsGroupId(g.id); }}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-muted"
+                        title="Configurações do grupo"
                       >
-                        Entrar
-                      </Button>
+                        ⚙️
+                      </button>
                     )}
+                    <span className={`flex h-10 items-center rounded-lg px-4 text-sm font-bold ${joined ? "bg-primary text-primary-foreground" : "border border-border/60 text-muted-foreground"}`}>
+                      {joined ? "Abrir →" : "Entrar"}
+                    </span>
                   </div>
                 </li>
               );
@@ -191,43 +178,20 @@ function HomePage() {
         }}
       />
 
-      <EditGroupDialog
-        group={groups.find((g) => g.id === editGroupId) ?? null}
-        onClose={() => setEditGroupId(null)}
+      <GroupSettingsDialog
+        group={groups.find((g) => g.id === settingsGroupId) ?? null}
+        onClose={() => setSettingsGroupId(null)}
         onSave={(id, name, password) => {
           updateGroup(id, name, password);
-          setEditGroupId(null);
+          setSettingsGroupId(null);
           toast.success("Grupo atualizado!");
         }}
+        onDelete={(id) => {
+          deleteGroup(id);
+          setSettingsGroupId(null);
+          toast.success("Grupo apagado.");
+        }}
       />
-
-      {/* Delete confirm dialog */}
-      <Dialog open={!!deleteConfirmId} onOpenChange={(o) => !o && setDeleteConfirmId(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Apagar grupo?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Isso vai apagar o grupo e todas as festas dele permanentemente. Não tem volta.
-          </p>
-          <DialogFooter className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setDeleteConfirmId(null)}>
-              Cancelar
-            </Button>
-            <Button
-              className="flex-1 bg-red-500 font-bold text-white hover:bg-red-600"
-              onClick={() => {
-                if (!deleteConfirmId) return;
-                deleteGroup(deleteConfirmId);
-                setDeleteConfirmId(null);
-                toast.success("Grupo apagado.");
-              }}
-            >
-              Apagar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -315,7 +279,7 @@ function RankingSection({ playerStats }: { playerStats: Record<string, PlayerSta
       {/* Os + Loucos */}
       <div className="rounded-2xl border border-border/60 bg-card p-3">
         <p className="mb-2 text-center text-[11px] font-black uppercase tracking-widest text-[color:var(--neon-purple)]">
-          🤪 Os + Loucos
+          🤪 Os + Viciados
         </p>
         {topLocos.length === 0 ? (
           <p className="text-center text-xs text-muted-foreground">Ninguém apostou ainda</p>
@@ -363,55 +327,89 @@ function RankingSection({ playerStats }: { playerStats: Record<string, PlayerSta
   );
 }
 
-function EditGroupDialog({
+function GroupSettingsDialog({
   group,
   onClose,
   onSave,
+  onDelete,
 }: {
   group: { id: string; name: string; password: string } | null;
   onClose: () => void;
   onSave: (id: string, name: string, password: string) => void;
+  onDelete: (id: string) => void;
 }) {
+  const [mode, setMode] = useState<"menu" | "edit" | "delete">("menu");
   const [name, setName] = useState("");
   const [pass, setPass] = useState("");
 
   useEffect(() => {
-    if (group) { setName(group.name); setPass(group.password); }
+    if (group) { setName(group.name); setPass(group.password); setMode("menu"); }
   }, [group?.id]);
 
   return (
     <Dialog open={!!group} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Editar grupo</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <Input
-            placeholder="Nome do grupo"
-            className="h-12"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Input
-            placeholder="Senha do grupo"
-            type="password"
-            className="h-12"
-            value={pass}
-            onChange={(e) => setPass(e.target.value)}
-          />
-        </div>
-        <DialogFooter>
-          <Button
-            className="h-12 w-full font-bold"
-            onClick={() => {
-              if (!group) return;
-              if (!name.trim() || !pass.trim()) { toast.error("Faltou nome ou senha"); return; }
-              onSave(group.id, name.trim(), pass.trim());
-            }}
-          >
-            Salvar
-          </Button>
-        </DialogFooter>
+        {mode === "menu" && (
+          <>
+            <DialogHeader><DialogTitle>⚙️ Configurações do grupo</DialogTitle></DialogHeader>
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="h-12 w-full justify-start gap-3 font-bold"
+                onClick={() => setMode("edit")}
+              >
+                ✏️ Editar nome e senha
+              </Button>
+              <Button
+                className="h-12 w-full justify-start gap-3 bg-red-500 font-bold text-white hover:bg-red-600"
+                onClick={() => setMode("delete")}
+              >
+                🗑️ Excluir grupo
+              </Button>
+            </div>
+          </>
+        )}
+
+        {mode === "edit" && (
+          <>
+            <DialogHeader><DialogTitle>Editar grupo</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <Input placeholder="Nome do grupo" className="h-12" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input placeholder="Senha do grupo" type="password" className="h-12" value={pass} onChange={(e) => setPass(e.target.value)} />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setMode("menu")}>← Voltar</Button>
+              <Button
+                className="flex-1 font-bold"
+                onClick={() => {
+                  if (!group) return;
+                  if (!name.trim() || !pass.trim()) { toast.error("Faltou nome ou senha"); return; }
+                  onSave(group.id, name.trim(), pass.trim());
+                }}
+              >
+                Salvar
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+
+        {mode === "delete" && (
+          <>
+            <DialogHeader><DialogTitle>Apagar grupo?</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Isso vai apagar o grupo e todas as festas permanentemente. Não tem volta.
+            </p>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setMode("menu")}>← Voltar</Button>
+              <Button
+                className="flex-1 bg-red-500 font-bold text-white hover:bg-red-600"
+                onClick={() => { if (group) onDelete(group.id); }}
+              >
+                Apagar
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
