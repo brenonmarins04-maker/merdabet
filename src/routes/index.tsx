@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { LogOut, PartyPopper, Plus, Search, Trash2, Users } from "lucide-react";
+import { LogOut, PartyPopper, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,12 +26,13 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
-  const { user, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, logout, playerStats } = useApp();
+  const { user, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup, logout, playerStats } = useApp();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [joinDialogId, setJoinDialogId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) navigate({ to: "/auth" });
@@ -125,14 +126,24 @@ function HomePage() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {isOwner && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-9 w-9 p-0 text-muted-foreground hover:text-red-400"
-                        onClick={() => setDeleteConfirmId(g.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-9 w-9 p-0 text-muted-foreground hover:text-primary"
+                          onClick={() => setEditGroupId(g.id)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-9 w-9 p-0 text-muted-foreground hover:text-red-400"
+                          onClick={() => setDeleteConfirmId(g.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
                     )}
                     {joined ? (
                       <Button asChild size="sm" className="h-10 px-4 font-bold">
@@ -177,6 +188,16 @@ function HomePage() {
           setJoinDialogId(null);
           toast.success("Entrou no grupo!");
           navigate({ to: "/group/$groupId", params: { groupId: id } });
+        }}
+      />
+
+      <EditGroupDialog
+        group={groups.find((g) => g.id === editGroupId) ?? null}
+        onClose={() => setEditGroupId(null)}
+        onSave={(id, name, password) => {
+          updateGroup(id, name, password);
+          setEditGroupId(null);
+          toast.success("Grupo atualizado!");
         }}
       />
 
@@ -339,6 +360,60 @@ function RankingSection({ playerStats }: { playerStats: Record<string, PlayerSta
         )}
       </div>
     </section>
+  );
+}
+
+function EditGroupDialog({
+  group,
+  onClose,
+  onSave,
+}: {
+  group: { id: string; name: string; password: string } | null;
+  onClose: () => void;
+  onSave: (id: string, name: string, password: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [pass, setPass] = useState("");
+
+  useEffect(() => {
+    if (group) { setName(group.name); setPass(group.password); }
+  }, [group?.id]);
+
+  return (
+    <Dialog open={!!group} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Editar grupo</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Input
+            placeholder="Nome do grupo"
+            className="h-12"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Input
+            placeholder="Senha do grupo"
+            type="password"
+            className="h-12"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            className="h-12 w-full font-bold"
+            onClick={() => {
+              if (!group) return;
+              if (!name.trim() || !pass.trim()) { toast.error("Faltou nome ou senha"); return; }
+              onSave(group.id, name.trim(), pass.trim());
+            }}
+          >
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

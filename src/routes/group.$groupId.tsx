@@ -230,7 +230,6 @@ function PartyCard({
   const beforeStart = Date.now() < date.getTime();
   const ended = isEnded(party);
   const needsAttendance = beforeStart && !party.attending && !ended;
-  const hasBets = pendingBets.length > 0 || liveBets.length > 0;
 
   return (
     <li className="overflow-hidden rounded-2xl border border-border/60 bg-card transition hover:border-primary/60">
@@ -255,38 +254,36 @@ function PartyCard({
           {statusBadge(party.status, ended)}
         </div>
 
-        {/* Bet previews */}
-        {hasBets && (
+        {/* Top 3 live bets by most placements */}
+        {liveBets.length > 0 && (
           <div className="mt-3 space-y-1.5">
-            {pendingBets.map((pb) => (
-              <div
-                key={pb.id}
-                className="flex items-center gap-2 rounded-lg bg-[color:var(--neon-yellow)]/10 px-3 py-2"
-              >
-                <span className="text-sm">⚠️</span>
-                <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-yellow)]">
-                  {pb.description}
-                </p>
-                <span className="shrink-0 text-[10px] font-black tabular-nums text-[color:var(--neon-yellow)]">
-                  {pb.approvals}/{pb.needed}
-                </span>
-              </div>
-            ))}
-            {liveBets.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center gap-2 rounded-lg bg-[color:var(--neon-green)]/10 px-3 py-2"
-              >
-                <span className="text-sm">🔥</span>
-                <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-green)]">
-                  {b.description}
-                </p>
-                <span className="shrink-0 text-[10px] font-black tabular-nums text-green-400">
-                  {b.odd.toFixed(2)}x
-                </span>
-              </div>
-            ))}
+            {[...liveBets]
+              .sort((a, b) => b.placementsCount - a.placementsCount)
+              .slice(0, 3)
+              .map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-2 rounded-lg bg-[color:var(--neon-green)]/10 px-3 py-2"
+                >
+                  <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-green)]">
+                    {b.description}
+                  </p>
+                  <span className="shrink-0 rounded-md bg-green-400/20 px-1.5 py-0.5 text-[10px] font-black tabular-nums text-green-400">
+                    {b.odd.toFixed(2)}x
+                  </span>
+                </div>
+              ))}
+            {liveBets.length > 3 && (
+              <p className="text-center text-[10px] text-muted-foreground">
+                +{liveBets.length - 3} apostas
+              </p>
+            )}
           </div>
+        )}
+        {liveBets.length === 0 && pendingBets.length > 0 && (
+          <p className="mt-3 text-xs font-bold text-[color:var(--neon-yellow)]">
+            ⚠️ {pendingBets.length} aposta{pendingBets.length !== 1 ? "s" : ""} aguardando aprovação
+          </p>
         )}
 
         <div className="mt-3 flex gap-2">

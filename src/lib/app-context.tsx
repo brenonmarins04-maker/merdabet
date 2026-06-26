@@ -161,6 +161,7 @@ type Ctx = {
   createGroup: (name: string, password: string) => Group;
   joinGroup: (id: string) => void;
   deleteGroup: (id: string) => void;
+  updateGroup: (id: string, name: string, password: string) => void;
 
   parties: Party[];
   addParty: (groupId: string, name: string, start: string, end: string) => void;
@@ -557,6 +558,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const updateGroup = useCallback(
+    (id: string, name: string, password: string) => {
+      setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, name, password } : g)));
+      supabase.from("groups").update({ name, password }).eq("id", id).then(() => {});
+    },
+    [],
+  );
+
   // ─── Parties ──────────────────────────────────────────────────────────────────
 
   const addParty = useCallback(
@@ -945,7 +954,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Ctx>(
     () => ({
       user, balance, login, logout, addBalance, spend,
-      groups, joinedGroupIds, createGroup, joinGroup, deleteGroup,
+      groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
       bets, placeBet, voteBet, requestDispute, voteDispute,
@@ -954,7 +963,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       user, balance, login, logout, addBalance, spend,
-      groups, joinedGroupIds, createGroup, joinGroup, deleteGroup,
+      groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
       bets, placeBet, voteBet, requestDispute, voteDispute,
