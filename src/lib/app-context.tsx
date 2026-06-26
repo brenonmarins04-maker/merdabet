@@ -515,14 +515,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!user) return;
       if (joinedGroupIds.includes(id)) return;
       setJoined((prev) => [...prev, id]);
-      setGroups((prev) =>
-        prev.map((g) => (g.id === id ? { ...g, members: g.members + 1 } : g)),
-      );
       const currentMembers = groups.find((g) => g.id === id)?.members ?? 0;
+      const newMembers = currentMembers + 1;
+      const newNeeded = Math.max(1, Math.ceil(newMembers / 3));
+      setGroups((prev) =>
+        prev.map((g) => (g.id === id ? { ...g, members: newMembers } : g)),
+      );
+      // Recalculate needed for all pending bets and active disputes in this group
+      const groupPartyIds = parties.filter((p) => p.groupId === id).map((p) => p.id);
+      setPending((prev) =>
+        prev.map((pb) =>
+          groupPartyIds.includes(pb.partyId) ? { ...pb, needed: newNeeded } : pb,
+        ),
+      );
+      setBets((prev) =>
+        prev.map((b) =>
+          groupPartyIds.includes(b.partyId) && b.disputeStatus === "pending"
+            ? { ...b, disputeNeeded: newNeeded }
+            : b,
+        ),
+      );
       supabase.from("group_members").insert({ group_id: id, user_id: user.name }).then(() => {});
-      supabase.from("groups").update({ members: currentMembers + 1 }).eq("id", id).then(() => {});
+      supabase.from("groups").update({ members: newMembers }).eq("id", id).then(() => {});
+      if (groupPartyIds.length > 0) {
+        supabase.from("pending_bets").update({ needed: newNeeded }).in("party_id", groupPartyIds).then(() => {});
+        supabase.from("bets").update({ dispute_needed: newNeeded }).in("party_id", groupPartyIds).eq("dispute_status", "pending").then(() => {});
+      }
     },
-    [user, groups, joinedGroupIds],
+    [user, groups, joinedGroupIds, parties],
   );
 
   const deleteGroup = useCallback(
@@ -592,8 +612,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (partyId: string, description: string, odd: number) => {
       if (!user) return;
       const party = parties.find((p) => p.id === partyId);
-      const attendees = party?.attendees ?? 0;
-      const needed = Math.max(1, Math.ceil(attendees / 3));
+      const group = groups.find((g) => g.id === party?.groupId);
+      const members = group?.members ?? 1;
+      const needed = Math.max(1, Math.ceil(members / 3));
       const pb: PendingBet = {
         id: `pb${Date.now()}`,
         partyId,
@@ -608,7 +629,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .insert({ id: pb.id, party_id: partyId, description, odd, approvals: 0, needed })
         .then(() => {});
     },
-    [user, parties],
+    [user, parties, groups],
   );
 
   const votePending = useCallback(
