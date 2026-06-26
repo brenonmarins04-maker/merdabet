@@ -421,8 +421,8 @@ function BetCard({
           {bet.odd.toFixed(2)}x
         </span>
         {bet.placementsCount > 0 && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {bet.placementsCount}🧑
+          <span className="shrink-0 rounded-lg bg-zinc-800/60 px-2 py-1 text-[11px] font-bold tabular-nums text-muted-foreground">
+            {bet.placementsCount}🧑 · {bet.totalWagered}c
           </span>
         )}
 

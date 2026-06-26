@@ -273,8 +273,8 @@ function PartyCard({
                       {b.odd.toFixed(2)}x
                     </span>
                     {b.placementsCount > 0 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {b.placementsCount}🧑
+                      <span className="text-[10px] tabular-nums text-muted-foreground">
+                        {b.placementsCount}🧑 · {b.totalWagered}c
                       </span>
                     )}
                   </div>

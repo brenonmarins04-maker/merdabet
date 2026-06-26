@@ -4,6 +4,7 @@
 
 -- 1. bets: new columns
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS placements_count   integer       not null default 0;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS total_wagered      integer       not null default 0;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS dispute_type       text          check (dispute_type in ('change_odd', 'delete'));
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS dispute_new_odd    numeric(5,2);
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS dispute_approvals  integer       not null default 0;

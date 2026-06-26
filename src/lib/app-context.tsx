@@ -80,7 +80,7 @@ type DbPendingBet = {
 type DbBet = {
   id: string; party_id: string; description: string;
   odd: number; votes_happened: number; votes_not: number; resolved: string | null;
-  placements_count: number;
+  placements_count: number; total_wagered: number;
   dispute_type: string | null; dispute_new_odd: number | null;
   dispute_approvals: number; dispute_rejections: number;
   dispute_needed: number; dispute_status: string;
@@ -130,6 +130,7 @@ function mapBet(
     votesHappened: r.votes_happened, votesNot: r.votes_not,
     resolved: r.resolved as Bet["resolved"],
     placementsCount: r.placements_count ?? 0,
+    totalWagered: r.total_wagered ?? 0,
     placed: placed !== undefined ? { amount: placed } : undefined,
     voted,
     disputeType: r.dispute_type as Bet["disputeType"],
@@ -673,6 +674,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             votesHappened: 0,
             votesNot: 0,
             placementsCount: 0,
+            totalWagered: 0,
             disputeApprovals: 0,
             disputeRejections: 0,
             disputeNeeded: 1,
@@ -736,10 +738,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (betId: string, amount: number) => {
       if (!user) return;
       placedMapRef.current = new Map([...placedMapRef.current, [betId, amount]]);
-      const currentPlacementsCount = bets.find((b) => b.id === betId)?.placementsCount ?? 0;
+      const currentBet = bets.find((b) => b.id === betId);
+      const currentPlacementsCount = currentBet?.placementsCount ?? 0;
+      const currentTotalWagered = currentBet?.totalWagered ?? 0;
       setBets((prev) =>
         prev.map((b) =>
-          b.id === betId ? { ...b, placed: { amount }, placementsCount: b.placementsCount + 1 } : b,
+          b.id === betId
+            ? { ...b, placed: { amount }, placementsCount: b.placementsCount + 1, totalWagered: b.totalWagered + amount }
+            : b,
         ),
       );
       const newBetCount = (playerStats[user.name]?.betCount ?? 0) + 1;
@@ -753,7 +759,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .then(() => {});
       supabase
         .from("bets")
-        .update({ placements_count: currentPlacementsCount + 1 })
+        .update({ placements_count: currentPlacementsCount + 1, total_wagered: currentTotalWagered + amount })
         .eq("id", betId)
         .then(() => {});
       supabase

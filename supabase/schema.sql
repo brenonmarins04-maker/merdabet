@@ -100,6 +100,7 @@ create table bets (
   votes_not integer not null default 0,
   resolved text check (resolved in ('happened', 'not')),
   placements_count integer not null default 0,
+  total_wagered integer not null default 0,
   dispute_type text check (dispute_type in ('change_odd', 'delete')),
   dispute_new_odd numeric(5,2),
   dispute_approvals integer not null default 0,
