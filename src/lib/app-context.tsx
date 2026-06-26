@@ -414,7 +414,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // New user
     const { error } = await supabase.from("users").insert({ id: name, password, balance: 50, bet_count: 0 });
-    if (error) return "Erro ao criar usuário. Tente novamente.";
+    if (error) return `Erro ao criar usuário: ${error.message}`;
 
     setUser({ name });
     setBalance(50);
