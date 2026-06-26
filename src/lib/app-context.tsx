@@ -102,6 +102,31 @@ type DbGroupMember = { group_id: string; user_id: string };
 type DbBetPlacement = { bet_id: string; user_id: string; amount: number; locked_odd?: number | null };
 type BetPlacement = { betId: string; userId: string; amount: number; odd: number };
 
+async function fetchBetPlacements(userId?: string): Promise<DbBetPlacement[]> {
+  let query = supabase.from("bet_placements").select("bet_id, user_id, amount, locked_odd");
+  if (userId) query = query.eq("user_id", userId);
+
+  const { data, error } = await query;
+  if (!error) return (data ?? []) as DbBetPlacement[];
+
+  const missingLockedOdd = error.code === "42703" && error.message.includes("locked_odd");
+  if (!missingLockedOdd) {
+    console.warn("Failed to load bet placements", error);
+    return [];
+  }
+
+  let fallbackQuery = supabase.from("bet_placements").select("bet_id, user_id, amount");
+  if (userId) fallbackQuery = fallbackQuery.eq("user_id", userId);
+
+  const { data: fallbackData, error: fallbackError } = await fallbackQuery;
+  if (fallbackError) {
+    console.warn("Failed to load bet placements without locked odds", fallbackError);
+    return [];
+  }
+
+  return (fallbackData ?? []) as DbBetPlacement[];
+}
+
 // ─── Mapping helpers ───────────────────────────────────────────────────────────
 
 function mapGroup(r: DbGroup): Group {
@@ -165,12 +190,25 @@ function mapEsmola(r: DbEsmola): Esmola {
   return { id: r.id, groupId: r.group_id, user: r.user_id, amount: r.amount, donated: r.donated };
 }
 
-function mapBetPlacement(r: DbBetPlacement): BetPlacement {
+function getBetOddFallbacks(rows: DbBet[]): Map<string, number> {
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      Number(row.current_odd ?? row.odd ?? row.initial_odd ?? 1.01),
+    ]),
+  );
+}
+
+function getPlacementOdd(r: DbBetPlacement, betOddFallbacks: Map<string, number>): number {
+  return Number(r.locked_odd ?? betOddFallbacks.get(r.bet_id) ?? 1.01);
+}
+
+function mapBetPlacement(r: DbBetPlacement, betOddFallbacks: Map<string, number>): BetPlacement {
   return {
     betId: r.bet_id,
     userId: r.user_id,
     amount: r.amount,
-    odd: Number(r.locked_odd ?? 1.01),
+    odd: getPlacementOdd(r, betOddFallbacks),
   };
 }
 
@@ -282,13 +320,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.from("pending_bets").select("*").order("created_at", { ascending: false }),
       supabase.from("pending_bet_votes").select("pending_bet_id, vote").eq("user_id", username),
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
-      supabase.from("bet_placements").select("bet_id, amount, locked_odd").eq("user_id", username),
+      fetchBetPlacements(username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("esmolas").select("*").order("created_at", { ascending: false }),
       supabase.from("users").select("id, balance, bet_count"),
       supabase.from("group_members").select("group_id, user_id"),
-      supabase.from("bet_placements").select("bet_id, user_id, amount, locked_odd"),
+      fetchBetPlacements(),
     ]);
 
     // Build per-user sets/maps
@@ -303,10 +341,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .filter((r: { pending_bet_id: string; vote: string }) => r.vote === "reject")
         .map((r: { pending_bet_id: string }) => r.pending_bet_id),
     );
+    const betOddFallbacks = getBetOddFallbacks((betsRes.data ?? []) as DbBet[]);
     const placedMap = new Map<string, PlacedBet>(
-      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number; locked_odd?: number | null }) => [
+      placementsRes.map((r: DbBetPlacement) => [
         r.bet_id,
-        { amount: r.amount, odd: Number(r.locked_odd ?? 1.01) },
+        { amount: r.amount, odd: getPlacementOdd(r, betOddFallbacks) },
       ] as [string, PlacedBet]),
     );
     const votedMap = new Map<string, "happened" | "not" | "unsure">(
@@ -317,7 +356,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     const topPlacerMap = new Map<string, { userId: string; amount: number }>();
-    for (const p of (allPlacementsRes.data ?? []) as DbBetPlacement[]) {
+    for (const p of allPlacementsRes) {
       const cur = topPlacerMap.get(p.bet_id);
       if (!cur || p.amount > cur.amount) topPlacerMap.set(p.bet_id, { userId: p.user_id, amount: p.amount });
     }
@@ -337,7 +376,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap, topPlacerMap)));
     setEsmolas((esmolasRes.data ?? []).map(mapEsmola));
     setGroupMembers(groupMembersByGroup((groupMembersRes.data ?? []) as DbGroupMember[]));
-    setAllPlacements(((allPlacementsRes.data ?? []) as DbBetPlacement[]).map(mapBetPlacement));
+    setAllPlacements(allPlacementsRes.map((r) => mapBetPlacement(r, betOddFallbacks)));
 
     const stats: Record<string, PlayerStats> = {};
     for (const u of (usersRes.data ?? []) as DbUser[]) {
@@ -383,15 +422,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshBets = useCallback(async (username: string) => {
     const [betsRes, placementsRes, betVotesRes, disputeVotesRes, allPlacementsRes] = await Promise.all([
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
-      supabase.from("bet_placements").select("bet_id, amount, locked_odd").eq("user_id", username),
+      fetchBetPlacements(username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
-      supabase.from("bet_placements").select("bet_id, user_id, amount, locked_odd"),
+      fetchBetPlacements(),
     ]);
+    const betOddFallbacks = getBetOddFallbacks((betsRes.data ?? []) as DbBet[]);
     const placedMap = new Map<string, PlacedBet>(
-      (placementsRes.data ?? []).map((r: { bet_id: string; amount: number; locked_odd?: number | null }) => [
+      placementsRes.map((r: DbBetPlacement) => [
         r.bet_id,
-        { amount: r.amount, odd: Number(r.locked_odd ?? 1.01) },
+        { amount: r.amount, odd: getPlacementOdd(r, betOddFallbacks) },
       ] as [string, PlacedBet]),
     );
     const votedMap = new Map<string, "happened" | "not" | "unsure">(
@@ -401,7 +441,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
     );
     const topPlacerMap = new Map<string, { userId: string; amount: number }>();
-    for (const p of (allPlacementsRes.data ?? []) as DbBetPlacement[]) {
+    for (const p of allPlacementsRes) {
       const cur = topPlacerMap.get(p.bet_id);
       if (!cur || p.amount > cur.amount) topPlacerMap.set(p.bet_id, { userId: p.user_id, amount: p.amount });
     }
@@ -409,7 +449,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     votedMapRef.current = votedMap;
     disputeVotedMapRef.current = disputeVotedMap;
     topPlacerMapRef.current = topPlacerMap;
-    setAllPlacements(((allPlacementsRes.data ?? []) as DbBetPlacement[]).map(mapBetPlacement));
+    setAllPlacements(allPlacementsRes.map((r) => mapBetPlacement(r, betOddFallbacks)));
     setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap, topPlacerMap)));
   }, []);
 
