@@ -36,11 +36,11 @@ export function AppHeader({ back, title }: Props) {
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--coin)]/40 bg-[color:var(--coin)]/10 px-3 py-1.5 text-sm font-black text-[color:var(--coin)]">
+        <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-green-400/40 bg-green-400/10 px-3 py-1.5 text-sm font-black text-green-400">
           <Coins className="h-4 w-4" />
           <span className="tabular-nums">{balance}</span>
           <span className="text-[11px] font-bold uppercase tracking-wider opacity-70">
-            contos
+            conto
           </span>
         </div>
       </div>

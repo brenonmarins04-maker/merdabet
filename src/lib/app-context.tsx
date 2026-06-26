@@ -39,12 +39,11 @@ type Ctx = {
   confirmAttendance: (partyId: string) => void;
 
   pending: PendingBet[];
-  approvePending: (id: string) => void;
+  votePending: (id: string, vote: "approve" | "reject") => void;
   suggestBet: (partyId: string, description: string, oddFor: number, oddAgainst: number) => void;
 
   bets: Bet[];
   placeBet: (betId: string, side: "for" | "against", amount: number) => void;
-  cashOut: (betId: string) => number;
   voteBet: (betId: string, vote: "happened" | "not") => void;
 
   esmolas: Esmola[];
@@ -58,7 +57,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [balance, setBalance] = useState(0);
   const [groups, setGroups] = useState<Group[]>(initialGroups);
-  const [joinedGroupIds, setJoined] = useState<string[]>(["g1", "g2"]);
+  const [joinedGroupIds, setJoined] = useState<string[]>([]);
   const [parties, setParties] = useState<Party[]>(initialParties);
   const [pending, setPending] = useState<PendingBet[]>(initialPending);
   const [bets, setBets] = useState<Bet[]>(initialBets);
@@ -122,14 +121,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBalance((b) => b + 50);
   }, []);
 
-  const approvePending = useCallback((id: string) => {
-    setPending((ps) =>
-      ps.map((p) =>
-        p.id === id && !p.approvedByMe
-          ? { ...p, approvals: p.approvals + 1, approvedByMe: true }
-          : p,
-      ),
-    );
+  const votePending = useCallback((id: string, vote: "approve" | "reject") => {
+    setPending((ps) => {
+      const updated = ps.map((p) => {
+        if (p.id !== id) return p;
+        if (p.approvedByMe || p.rejectedByMe) return p;
+        const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
+        return {
+          ...p,
+          approvals: newApprovals,
+          approvedByMe: vote === "approve" ? true : p.approvedByMe,
+          rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
+        };
+      });
+
+      // auto-promote to live if reached needed approvals
+      const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
+      if (promoted) {
+        setBets((bs) => [
+          {
+            id: `b${Date.now()}`,
+            partyId: promoted.partyId,
+            description: promoted.description,
+            oddFor: promoted.oddFor,
+            oddAgainst: promoted.oddAgainst,
+          },
+          ...bs,
+        ]);
+        return updated.filter((p) => p.id !== id);
+      }
+
+      return updated;
+    });
   }, []);
 
   const suggestBet = useCallback(
@@ -138,22 +161,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: `pb${Date.now()}`,
         partyId,
         description,
+        oddFor,
+        oddAgainst,
         approvals: 0,
         needed: 3,
       };
       setPending((ps) => [pb, ...ps]);
-      // also stage a bet (would be activated after validation) — for mock,
-      // we also add to live with the user's chosen odds:
-      setBets((bs) => [
-        {
-          id: `b${Date.now()}`,
-          partyId,
-          description,
-          oddFor,
-          oddAgainst,
-        },
-        ...bs,
-      ]);
     },
     [],
   );
@@ -165,20 +178,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
     },
     [],
-  );
-
-  const cashOut = useCallback(
-    (betId: string) => {
-      const bet = bets.find((b) => b.id === betId);
-      if (!bet?.placed) return 0;
-      const odd = bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst;
-      // cash out is a fraction (mock): 0.7x of potential
-      const value = Math.max(1, Math.round(bet.placed.amount * odd * 0.7));
-      setBalance((b) => b + value);
-      setBets((bs) => bs.map((b) => (b.id === betId ? { ...b, placed: undefined } : b)));
-      return value;
-    },
-    [bets],
   );
 
   const voteBet = useCallback((betId: string, vote: "happened" | "not") => {
@@ -216,11 +215,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addParty,
       confirmAttendance,
       pending,
-      approvePending,
+      votePending,
       suggestBet,
       bets,
       placeBet,
-      cashOut,
       voteBet,
       esmolas,
       requestEsmola,
@@ -241,11 +239,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addParty,
       confirmAttendance,
       pending,
-      approvePending,
+      votePending,
       suggestBet,
       bets,
       placeBet,
-      cashOut,
       voteBet,
       esmolas,
       requestEsmola,

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Coins, PartyPopper, Plus, ThumbsUp } from "lucide-react";
+import { Coins, Lock, PartyPopper, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,11 +23,11 @@ export const Route = createFileRoute("/party/$partyId")({
 
 function PartyPage() {
   const { partyId } = Route.useParams();
-  const { parties, pending, bets, confirmAttendance, approvePending, suggestBet } =
-    useApp();
+  const { parties, pending, bets, votePending, suggestBet } = useApp();
   const party = parties.find((p) => p.id === partyId);
 
   const [suggestOpen, setSuggestOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("pending");
 
   if (!party) {
     return (
@@ -38,10 +38,14 @@ function PartyPage() {
   }
 
   const startDate = new Date(party.start);
-  const beforeStart = Date.now() < startDate.getTime();
 
   const partyPending = pending.filter((p) => p.partyId === partyId);
   const partyBets = bets.filter((b) => b.partyId === partyId);
+
+  // Live tab is locked if there are any pending bets the user hasn't voted on yet
+  const hasUnvotedPending = partyPending.some(
+    (p) => !p.approvedByMe && !p.rejectedByMe,
+  );
 
   return (
     <div className="min-h-dvh pb-32">
@@ -63,29 +67,26 @@ function PartyPage() {
           </h2>
         </section>
 
-        {beforeStart && !party.attending && (
-          <button
-            onClick={() => {
-              confirmAttendance(party.id);
-              toast.success("Presença confirmada! +50 contos 🪙");
-            }}
-            className="animate-pulse-glow flex h-20 w-full items-center justify-center gap-2 rounded-2xl bg-[color:var(--neon-green)] text-lg font-black uppercase tracking-wide text-zinc-950"
-          >
-            🎉 Vou na festa!
-          </button>
-        )}
-        {party.attending && (
-          <div className="rounded-2xl border border-[color:var(--neon-green)]/40 bg-[color:var(--neon-green)]/10 p-4 text-center text-sm font-black uppercase tracking-wider text-[color:var(--neon-green)]">
-            ✓ Presença Confirmada
-          </div>
-        )}
-
-        <Tabs defaultValue="live" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid h-12 w-full grid-cols-3 rounded-xl bg-secondary p-1">
-            <TabsTrigger value="pending" className="text-xs font-bold uppercase">
+            <TabsTrigger value="pending" className="relative text-xs font-bold uppercase">
               Pendentes
+              {hasUnvotedPending && (
+                <span className="ml-1 text-base">⚠️</span>
+              )}
             </TabsTrigger>
-            <TabsTrigger value="live" className="text-xs font-bold uppercase">
+            <TabsTrigger
+              value="live"
+              disabled={hasUnvotedPending}
+              className="flex items-center gap-1 text-xs font-bold uppercase disabled:opacity-50"
+              onClick={(e) => {
+                if (hasUnvotedPending) {
+                  e.preventDefault();
+                  toast.warning("Vote em todas as pendentes primeiro! ⚠️");
+                }
+              }}
+            >
+              {hasUnvotedPending && <Lock className="h-3 w-3" />}
               Ao Vivo
             </TabsTrigger>
             <TabsTrigger value="vote" className="text-xs font-bold uppercase">
@@ -96,15 +97,26 @@ function PartyPage() {
           <TabsContent value="pending" className="mt-4 space-y-3">
             {partyPending.length === 0 && <Empty msg="Nenhuma merda na fila ainda." />}
             {partyPending.map((pb) => (
-              <PendingCard key={pb.id} pb={pb} onApprove={approvePending} />
+              <PendingCard key={pb.id} pb={pb} onVote={votePending} />
             ))}
           </TabsContent>
 
           <TabsContent value="live" className="mt-4 space-y-3">
-            {partyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
-            {partyBets.map((b) => (
-              <BetCard key={b.id} bet={b} />
-            ))}
+            {hasUnvotedPending ? (
+              <div className="rounded-2xl border border-[color:var(--neon-yellow)]/40 bg-[color:var(--neon-yellow)]/10 p-6 text-center">
+                <p className="text-4xl">🔒</p>
+                <p className="mt-2 font-black uppercase tracking-wide text-[color:var(--neon-yellow)]">
+                  Vá nas pendentes e vote primeiro!
+                </p>
+              </div>
+            ) : (
+              <>
+                {partyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
+                {partyBets.map((b) => (
+                  <BetCard key={b.id} bet={b} />
+                ))}
+              </>
+            )}
           </TabsContent>
 
           <TabsContent value="vote" className="mt-4 space-y-3">
@@ -146,28 +158,74 @@ function Empty({ msg }: { msg: string }) {
 
 function PendingCard({
   pb,
-  onApprove,
+  onVote,
 }: {
   pb: PendingBet;
-  onApprove: (id: string) => void;
+  onVote: (id: string, vote: "approve" | "reject") => void;
 }) {
+  const voted = pb.approvedByMe || pb.rejectedByMe;
   return (
     <div className="rounded-2xl border border-border/60 bg-card p-4">
+      {!voted && (
+        <div className="mb-2 flex items-center gap-2 text-[color:var(--neon-yellow)]">
+          <span className="text-3xl">⚠️</span>
+          <span className="text-xs font-black uppercase tracking-wider">Vote aqui!</span>
+        </div>
+      )}
       <p className="text-base font-bold leading-snug">{pb.description}</p>
+
+      {/* odds */}
+      <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+        <div className="rounded-xl bg-[color:var(--neon-green)]/10 px-2 py-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-green)]">
+            A Favor
+          </p>
+          <p className="text-xl font-black tabular-nums text-green-400">
+            {pb.oddFor.toFixed(2)}x
+          </p>
+        </div>
+        <div className="rounded-xl bg-[color:var(--neon-red)]/10 px-2 py-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">
+            Contra
+          </p>
+          <p className="text-xl font-black tabular-nums text-[color:var(--neon-red)]">
+            {pb.oddAgainst.toFixed(2)}x
+          </p>
+        </div>
+      </div>
+
       <div className="mt-3 flex items-center justify-between gap-3">
-        <Button
-          disabled={pb.approvedByMe}
-          onClick={() => onApprove(pb.id)}
-          className="h-11 flex-1 gap-2 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
-        >
-          <ThumbsUp className="h-4 w-4" />
-          {pb.approvedByMe ? "Aprovado" : "Faz Sentido"}
-        </Button>
+        {voted ? (
+          <p className="w-full text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
+            {pb.approvedByMe ? "✓ Votou: faz sentido" : "✗ Votou: não faz sentido"}
+          </p>
+        ) : (
+          <>
+            <Button
+              onClick={() => {
+                onVote(pb.id, "approve");
+                toast.success("Votou: faz sentido 👍");
+              }}
+              className="h-11 flex-1 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+            >
+              👍 Faz Sentido
+            </Button>
+            <Button
+              onClick={() => {
+                onVote(pb.id, "reject");
+                toast.success("Votou: não faz sentido 👎");
+              }}
+              className="h-11 flex-1 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
+            >
+              👎 Não Faz
+            </Button>
+          </>
+        )}
         <div className="shrink-0 text-right">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Aprovações
           </p>
-          <p className="text-lg font-black tabular-nums text-neon-green">
+          <p className="text-lg font-black tabular-nums text-green-400">
             {pb.approvals}/{pb.needed}
           </p>
         </div>
@@ -177,20 +235,9 @@ function PendingCard({
 }
 
 function BetCard({ bet }: { bet: Bet }) {
-  const { placeBet, cashOut, spend } = useApp();
+  const { placeBet, spend } = useApp();
   const [open, setOpen] = useState<null | "for" | "against">(null);
-  const [amt, setAmt] = useState(5);
-
-  const cashOutValue = bet.placed
-    ? Math.max(
-        1,
-        Math.round(
-          bet.placed.amount *
-            (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst) *
-            0.7,
-        ),
-      )
-    : 0;
+  const [amt, setAmt] = useState("5");
 
   return (
     <div className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">
@@ -201,7 +248,7 @@ function BetCard({ bet }: { bet: Bet }) {
           <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-green)]">
             A Favor
           </p>
-          <p className="text-2xl font-black tabular-nums text-neon-green">
+          <p className="text-2xl font-black tabular-nums text-green-400">
             {bet.oddFor.toFixed(2)}x
           </p>
         </div>
@@ -209,38 +256,38 @@ function BetCard({ bet }: { bet: Bet }) {
           <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">
             Contra
           </p>
-          <p className="text-2xl font-black tabular-nums text-neon-red">
+          <p className="text-2xl font-black tabular-nums text-[color:var(--neon-red)]">
             {bet.oddAgainst.toFixed(2)}x
           </p>
         </div>
       </div>
 
       {bet.placed ? (
-        <Button
-          className="h-12 w-full bg-[color:var(--neon-yellow)] font-black uppercase tracking-wide text-zinc-950 hover:bg-[color:var(--neon-yellow)]/90"
-          onClick={() => {
-            const v = cashOut(bet.id);
-            toast.success(`Cash Out: +${v} contos 💰`);
-          }}
-        >
-          Cash Out — Retirar {cashOutValue} contos
-        </Button>
+        <div className="rounded-xl border border-green-400/40 bg-green-400/10 p-3 text-center">
+          <p className="text-xs font-black uppercase tracking-wider text-green-400">
+            Apostou {bet.placed.amount} conto {bet.placed.side === "for" ? "a favor" : "contra"}
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Retorno potencial:{" "}
+            <span className="font-black text-green-400">
+              {(
+                bet.placed.amount *
+                (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst)
+              ).toFixed(2)}{" "}
+              conto
+            </span>
+          </p>
+        </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           <Button
-            onClick={() => {
-              setOpen("for");
-              setAmt(5);
-            }}
+            onClick={() => { setOpen("for"); setAmt("5"); }}
             className="h-12 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
           >
             Apostar A Favor
           </Button>
           <Button
-            onClick={() => {
-              setOpen("against");
-              setAmt(5);
-            }}
+            onClick={() => { setOpen("against"); setAmt("5"); }}
             className="h-12 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
           >
             Apostar Contra
@@ -257,22 +304,25 @@ function BetCard({ bet }: { bet: Bet }) {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">{bet.description}</p>
           <div className="flex items-center gap-2">
-            <Coins className="h-5 w-5 text-[color:var(--coin)]" />
+            <Coins className="h-5 w-5 text-green-400" />
             <Input
               type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min={1}
               value={amt}
-              onChange={(e) => setAmt(Math.max(1, Number(e.target.value) || 1))}
-              className="h-12 text-base font-bold tabular-nums"
+              onChange={(e) => setAmt(e.target.value.replace(/\D/g, ""))}
+              className="h-14 text-xl font-black tabular-nums text-green-400"
             />
           </div>
           <p className="text-xs text-muted-foreground">
             Retorno potencial:{" "}
-            <span className="font-black text-[color:var(--neon-green)]">
+            <span className="font-black text-green-400">
               {(
-                amt * (open === "for" ? bet.oddFor : bet.oddAgainst)
+                (Number(amt) || 0) *
+                (open === "for" ? bet.oddFor : bet.oddAgainst)
               ).toFixed(2)}{" "}
-              contos
+              conto
             </span>
           </p>
           <DialogFooter>
@@ -280,12 +330,14 @@ function BetCard({ bet }: { bet: Bet }) {
               className="h-12 w-full font-bold"
               onClick={() => {
                 if (!open) return;
-                if (!spend(amt)) {
-                  toast.error("Sem contos suficientes");
+                const n = Number(amt);
+                if (!n || n < 1) { toast.error("Valor inválido"); return; }
+                if (!spend(n)) {
+                  toast.error("Sem conto suficiente");
                   return;
                 }
-                placeBet(bet.id, open, amt);
-                toast.success(`Aposta de ${amt} contos confirmada`);
+                placeBet(bet.id, open, n);
+                toast.success(`Aposta de ${n} conto confirmada`);
                 setOpen(null);
               }}
             >
@@ -349,8 +401,8 @@ function SuggestDialog({
   onSuggest: (desc: string, oFor: number, oAgainst: number) => void;
 }) {
   const [desc, setDesc] = useState("");
-  const [oFor, setOFor] = useState(1.8);
-  const [oAgainst, setOAgainst] = useState(2);
+  const [oFor, setOFor] = useState("1.80");
+  const [oAgainst, setOAgainst] = useState("2.00");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -366,16 +418,18 @@ function SuggestDialog({
           />
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-xs font-bold uppercase text-[color:var(--neon-green)]">
+              <label className="text-xs font-bold uppercase text-green-400">
                 Odd A Favor
               </label>
               <Input
                 type="number"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
                 step={0.05}
                 min={1.01}
                 value={oFor}
-                onChange={(e) => setOFor(Number(e.target.value) || 1.01)}
-                className="h-12 font-black tabular-nums"
+                onChange={(e) => setOFor(e.target.value)}
+                className="h-12 font-black tabular-nums text-green-400"
               />
             </div>
             <div>
@@ -384,10 +438,12 @@ function SuggestDialog({
               </label>
               <Input
                 type="number"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
                 step={0.05}
                 min={1.01}
                 value={oAgainst}
-                onChange={(e) => setOAgainst(Number(e.target.value) || 1.01)}
+                onChange={(e) => setOAgainst(e.target.value)}
                 className="h-12 font-black tabular-nums"
               />
             </div>
@@ -401,7 +457,13 @@ function SuggestDialog({
                 toast.error("Descreve a merda aí");
                 return;
               }
-              onSuggest(desc.trim(), oFor, oAgainst);
+              const f = Number(oFor);
+              const a = Number(oAgainst);
+              if (f < 1.01 || a < 1.01) {
+                toast.error("Odds precisam ser maiores que 1.01");
+                return;
+              }
+              onSuggest(desc.trim(), f, a);
               setDesc("");
               onOpenChange(false);
             }}
