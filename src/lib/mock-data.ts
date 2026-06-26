@@ -10,6 +10,7 @@ export type Bet = {
   votesHappened: number;
   votesNot: number;
   resolved?: "happened" | "not";
+  placementsCount: number;
   // Dispute fields
   disputeType?: "change_odd" | "delete";
   disputeNewOdd?: number;
@@ -26,6 +27,7 @@ export type PendingBet = {
   description: string;
   odd: number;
   approvals: number;
+  rejections: number;
   needed: number;
   approvedByMe?: boolean;
   rejectedByMe?: boolean;

@@ -75,11 +75,12 @@ type DbParty = {
 };
 type DbPendingBet = {
   id: string; party_id: string; description: string;
-  odd: number; approvals: number; needed: number;
+  odd: number; approvals: number; rejections: number; needed: number;
 };
 type DbBet = {
   id: string; party_id: string; description: string;
   odd: number; votes_happened: number; votes_not: number; resolved: string | null;
+  placements_count: number;
   dispute_type: string | null; dispute_new_odd: number | null;
   dispute_approvals: number; dispute_rejections: number;
   dispute_needed: number; dispute_status: string;
@@ -109,7 +110,7 @@ function mapPendingBet(
 ): PendingBet {
   return {
     id: r.id, partyId: r.party_id, description: r.description,
-    odd: Number(r.odd), approvals: r.approvals, needed: r.needed,
+    odd: Number(r.odd), approvals: r.approvals, rejections: r.rejections ?? 0, needed: r.needed,
     approvedByMe: approvedIds.has(r.id),
     rejectedByMe: rejectedIds.has(r.id),
   };
@@ -128,6 +129,7 @@ function mapBet(
     odd: Number(r.odd),
     votesHappened: r.votes_happened, votesNot: r.votes_not,
     resolved: r.resolved as Bet["resolved"],
+    placementsCount: r.placements_count ?? 0,
     placed: placed !== undefined ? { amount: placed } : undefined,
     voted,
     disputeType: r.dispute_type as Bet["disputeType"],
@@ -621,12 +623,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         description,
         odd,
         approvals: 0,
+        rejections: 0,
         needed,
       };
       setPending((prev) => [pb, ...prev]);
       supabase
         .from("pending_bets")
-        .insert({ id: pb.id, party_id: partyId, description, odd, approvals: 0, needed })
+        .insert({ id: pb.id, party_id: partyId, description, odd, approvals: 0, rejections: 0, needed })
         .then(() => {});
     },
     [user, parties, groups],
@@ -641,9 +644,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (p.id !== id) return p;
           if (p.approvedByMe || p.rejectedByMe) return p;
           const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
+          const newRejections = vote === "reject" ? (p.rejections ?? 0) + 1 : (p.rejections ?? 0);
           return {
             ...p,
             approvals: newApprovals,
+            rejections: newRejections,
             approvedByMe: vote === "approve" ? true : p.approvedByMe,
             rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
           };
@@ -658,13 +663,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             odd: promoted.odd,
             votesHappened: 0,
             votesNot: 0,
+            placementsCount: 0,
             disputeApprovals: 0,
             disputeRejections: 0,
             disputeNeeded: 1,
             disputeStatus: "none",
           };
           setBets((bs) => [newBet, ...bs]);
-          // DB: insert bet, delete pending
           supabase
             .from("bets")
             .insert({
@@ -674,6 +679,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               odd: promoted.odd,
               votes_happened: 0,
               votes_not: 0,
+              placements_count: 0,
             })
             .then(() => {
               supabase.from("pending_bets").delete().eq("id", id).then(() => {});
@@ -681,21 +687,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return updated.filter((p) => p.id !== id);
         }
 
+        // Enough rejections → cancel the bet
+        const cancelled = updated.find((p) => p.id === id && (p.rejections ?? 0) >= p.needed);
+        if (cancelled) {
+          supabase.from("pending_bets").delete().eq("id", id).then(() => {});
+          return updated.filter((p) => p.id !== id);
+        }
+
         return updated;
       });
 
-      // Record user's vote and update approvals count in DB
+      // Record user's vote in DB
       supabase
         .from("pending_bet_votes")
         .insert({ pending_bet_id: id, user_id: user.name, vote })
         .then(() => {});
+
+      const target = pending.find((p) => p.id === id);
       if (vote === "approve") {
-        const currentApprovals = pending.find((p) => p.id === id)?.approvals ?? 0;
-        supabase
-          .from("pending_bets")
-          .update({ approvals: currentApprovals + 1 })
-          .eq("id", id)
-          .then(() => {});
+        const currentApprovals = target?.approvals ?? 0;
+        supabase.from("pending_bets").update({ approvals: currentApprovals + 1 }).eq("id", id).then(() => {});
+      } else {
+        const currentRejections = target?.rejections ?? 0;
+        supabase.from("pending_bets").update({ rejections: currentRejections + 1 }).eq("id", id).then(() => {});
       }
 
       if (vote === "approve") {
@@ -713,8 +727,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (betId: string, amount: number) => {
       if (!user) return;
       placedMapRef.current = new Map([...placedMapRef.current, [betId, amount]]);
+      const currentPlacementsCount = bets.find((b) => b.id === betId)?.placementsCount ?? 0;
       setBets((prev) =>
-        prev.map((b) => (b.id === betId ? { ...b, placed: { amount } } : b)),
+        prev.map((b) =>
+          b.id === betId ? { ...b, placed: { amount }, placementsCount: b.placementsCount + 1 } : b,
+        ),
       );
       const newBetCount = (playerStats[user.name]?.betCount ?? 0) + 1;
       setPlayerStats((s) => ({
@@ -724,6 +741,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase
         .from("bet_placements")
         .insert({ bet_id: betId, user_id: user.name, amount })
+        .then(() => {});
+      supabase
+        .from("bets")
+        .update({ placements_count: currentPlacementsCount + 1 })
+        .eq("id", betId)
         .then(() => {});
       supabase
         .from("users")

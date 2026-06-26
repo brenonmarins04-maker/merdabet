@@ -77,6 +77,7 @@ create table pending_bets (
   description text not null,
   odd numeric(5,2) not null,
   approvals integer not null default 0,
+  rejections integer not null default 0,
   needed integer not null default 1,
   created_at timestamptz default now()
 );
@@ -98,6 +99,7 @@ create table bets (
   votes_happened integer not null default 0,
   votes_not integer not null default 0,
   resolved text check (resolved in ('happened', 'not')),
+  placements_count integer not null default 0,
   dispute_type text check (dispute_type in ('change_odd', 'delete')),
   dispute_new_odd numeric(5,2),
   dispute_approvals integer not null default 0,

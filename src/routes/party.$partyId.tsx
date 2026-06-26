@@ -190,9 +190,11 @@ function PartyPage() {
             ) : (
               <>
                 {partyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
-                {partyBets.map((b) => (
-                  <BetCard key={b.id} bet={b} onRequestDispute={requestDispute} onVoteDispute={voteDispute} />
-                ))}
+                {[...partyBets]
+                  .sort((a, b) => b.placementsCount - a.placementsCount)
+                  .map((b) => (
+                    <BetCard key={b.id} bet={b} onRequestDispute={requestDispute} onVoteDispute={voteDispute} />
+                  ))}
               </>
             )}
           </TabsContent>
@@ -284,8 +286,8 @@ function PendingCard({ pb, onVote }: { pb: PendingBet; onVote: (id: string, v: "
           </>
         )}
         <div className="shrink-0 text-right">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Aprovações</p>
-          <p className="text-lg font-black tabular-nums text-green-400">{pb.approvals}/{pb.needed}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">✓ {pb.approvals}/{pb.needed}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">✗ {pb.rejections ?? 0}/{pb.needed}</p>
         </div>
       </div>
     </div>
@@ -311,113 +313,101 @@ function BetCard({
   const disputeRejected = bet.disputeStatus === "rejected";
 
   return (
-    <div className="relative space-y-3 rounded-2xl border border-border/60 bg-card p-4">
-      {/* Small red dispute trigger button */}
-      {canDispute && (
-        <button
-          onClick={() => setDisputeOpen(true)}
-          title="Pedir alteração ou exclusão"
-          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color:var(--neon-red)]/20 text-[10px] font-black text-[color:var(--neon-red)] ring-1 ring-[color:var(--neon-red)]/60 hover:bg-[color:var(--neon-red)]/40"
-        >
-          !
-        </button>
-      )}
-      {disputePending && (
-        <button
-          disabled
-          title="Pedido em andamento"
-          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-orange-400/20 text-[10px] font-black text-orange-400 ring-1 ring-orange-400/60"
-        >
-          ⏳
-        </button>
-      )}
+    <div className="rounded-2xl border border-border/60 bg-card p-3">
+      {/* Description */}
+      <p className="line-clamp-2 text-sm font-bold leading-snug">{bet.description}</p>
 
-      <p className="pr-7 text-base font-bold leading-snug">{bet.description}</p>
+      {/* ODD + action + dispute button row */}
+      <div className="mt-2 flex items-center gap-2">
+        <span className="shrink-0 rounded-lg bg-green-400/10 px-2.5 py-1.5 text-sm font-black tabular-nums text-green-400">
+          {bet.odd.toFixed(2)}x
+        </span>
 
-      <div className="flex items-center justify-center rounded-xl bg-green-400/10 px-3 py-3">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-green-400">ODD</p>
-        <p className="ml-2 text-3xl font-black tabular-nums text-green-400">{bet.odd.toFixed(2)}x</p>
+        {bet.placed ? (
+          <span className="flex-1 truncate text-xs text-muted-foreground">
+            ✓ <span className="font-black text-green-400">{bet.placed.amount}c</span>
+            {" → "}
+            <span className="font-black text-green-400">
+              {(bet.placed.amount * bet.odd).toFixed(0)}c
+            </span>
+          </span>
+        ) : (
+          <button
+            onClick={() => { setBetOpen(true); setAmt("5"); }}
+            className="h-8 flex-1 rounded-lg bg-[color:var(--neon-green)] text-xs font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+          >
+            Apostar
+          </button>
+        )}
+
+        {canDispute ? (
+          <button
+            onClick={() => setDisputeOpen(true)}
+            title="Contestar aposta"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[color:var(--neon-red)]/20 text-[10px] font-black text-[color:var(--neon-red)] ring-1 ring-[color:var(--neon-red)]/60 hover:bg-[color:var(--neon-red)]/40"
+          >
+            !
+          </button>
+        ) : disputePending ? (
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-400/20 text-sm text-orange-400 ring-1 ring-orange-400/60">
+            ⏳
+          </span>
+        ) : null}
       </div>
 
-      {/* Dispute rejected badge */}
+      {/* Dispute rejected */}
       {disputeRejected && (
-        <div className="rounded-xl border border-[color:var(--neon-red)]/30 bg-[color:var(--neon-red)]/10 px-3 py-2 text-center">
-          <p className="text-xs font-black uppercase tracking-wider text-[color:var(--neon-red)]">
-            ✗ Pedido de alteração negado
-          </p>
-        </div>
+        <p className="mt-1.5 text-[11px] font-bold text-[color:var(--neon-red)]">
+          ✗ Pedido negado — aposta continua normal
+        </p>
       )}
 
-      {/* Dispute pending voting banner */}
+      {/* Dispute pending voting */}
       {disputePending && (
-        <div className="rounded-xl border border-orange-400/40 bg-orange-400/10 p-3">
-          <p className="mb-2 text-center text-xs font-black uppercase tracking-wider text-orange-400">
-            {bet.disputeType === "delete" ? "⚡ Pedido de EXCLUSÃO" : "⚡ Pedido de MUDANÇA DE ODD"}
-            {bet.disputeType === "change_odd" && bet.disputeNewOdd && (
-              <span className="ml-1">→ {bet.disputeNewOdd.toFixed(2)}x</span>
-            )}
-          </p>
-          <p className="mb-2 text-center text-[10px] text-orange-400/80">
-            Aprovações: {bet.disputeApprovals}/{bet.disputeNeeded}
-          </p>
-          {bet.disputeVotedByMe ? (
-            <p className="text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
-              {bet.disputeVotedByMe === "approve" ? "✓ Você aprovou" : "✗ Você rejeitou"}
+        <div className="mt-2 rounded-xl border border-orange-400/30 bg-orange-400/10 p-2">
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-xs font-bold text-orange-400">
+              ⚡{" "}
+              {bet.disputeType === "delete"
+                ? "Excluir aposta"
+                : `ODD → ${bet.disputeNewOdd?.toFixed(2)}x`}
+              <span className="ml-1 font-normal text-orange-400/70">
+                {bet.disputeApprovals}/{bet.disputeNeeded}
+              </span>
             </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                onClick={() => { onVoteDispute(bet.id, "approve"); toast.success("Aprovado!"); }}
-                className="h-9 bg-[color:var(--neon-green)] text-xs font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
-              >
-                👍 Aprovar
-              </Button>
-              <Button
-                onClick={() => { onVoteDispute(bet.id, "reject"); toast.success("Rejeitado!"); }}
-                className="h-9 bg-[color:var(--neon-red)] text-xs font-black text-white hover:bg-[color:var(--neon-red)]/90"
-              >
-                👎 Rejeitar
-              </Button>
-            </div>
-          )}
+            {bet.disputeVotedByMe ? (
+              <span className="text-xs font-bold text-muted-foreground">
+                {bet.disputeVotedByMe === "approve" ? "✓ Aprovei" : "✗ Rejeitei"}
+              </span>
+            ) : (
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => { onVoteDispute(bet.id, "approve"); toast.success("Aprovado!"); }}
+                  className="h-7 rounded-lg bg-[color:var(--neon-green)] px-3 text-xs font-black text-zinc-950"
+                >
+                  👍
+                </button>
+                <button
+                  onClick={() => { onVoteDispute(bet.id, "reject"); toast.success("Rejeitado!"); }}
+                  className="h-7 rounded-lg bg-[color:var(--neon-red)] px-3 text-xs font-black text-white"
+                >
+                  👎
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      )}
-
-      {bet.placed ? (
-        <div className="rounded-xl border border-green-400/40 bg-green-400/10 p-3 text-center">
-          <p className="text-xs font-black uppercase tracking-wider text-green-400">
-            Apostou {bet.placed.amount} conto
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Retorno potencial:{" "}
-            <span className="font-black text-green-400">
-              {(bet.placed.amount * bet.odd).toFixed(2)} conto
-            </span>
-          </p>
-        </div>
-      ) : (
-        <Button
-          onClick={() => { setBetOpen(true); setAmt("5"); }}
-          className="h-12 w-full bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
-        >
-          Apostar
-        </Button>
       )}
 
       {/* Bet dialog */}
       <Dialog open={betOpen} onOpenChange={(o) => !o && setBetOpen(false)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Apostar</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Apostar</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">{bet.description}</p>
           <div className="flex items-center gap-2">
             <Coins className="h-5 w-5 text-green-400" />
             <Input
-              type="number"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              min={1}
+              type="number" inputMode="numeric" pattern="[0-9]*" min={1}
               value={amt}
               onChange={(e) => setAmt(e.target.value.replace(/\D/g, ""))}
               className="h-14 text-xl font-black tabular-nums text-green-400"
@@ -447,7 +437,6 @@ function BetCard({
         </DialogContent>
       </Dialog>
 
-      {/* Dispute request dialog */}
       <DisputeRequestDialog
         open={disputeOpen}
         onOpenChange={setDisputeOpen}
