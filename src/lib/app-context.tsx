@@ -21,6 +21,8 @@ import {
 
 type User = { name: string } | null;
 
+export type PlayerStats = { balance: number; betCount: number };
+
 export type VoteBetResult = {
   resolved: boolean;
   outcome?: "happened" | "not";
@@ -55,6 +57,8 @@ type Ctx = {
   placeBet: (betId: string, side: "for" | "against", amount: number) => void;
   voteBet: (betId: string, vote: "happened" | "not") => VoteBetResult;
 
+  playerStats: Record<string, PlayerStats>;
+
   esmolas: Esmola[];
   requestEsmola: (groupId: string, amount: number) => void;
   donateEsmola: (id: string) => void;
@@ -66,6 +70,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [balance, setBalance] = useState(0);
   const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
+  const [playerStats, setPlayerStats] = useState<Record<string, PlayerStats>>({});
   const [groups, setGroups] = useState<Group[]>(initialGroups);
   const [joinedGroupIds, setJoined] = useState<string[]>([]);
   const [parties, setParties] = useState<Party[]>(initialParties);
@@ -86,6 +91,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setUserRegistry((r) => ({ ...r, [name]: password }));
       setUser({ name });
       setBalance(50);
+      setPlayerStats((s) => ({
+        ...s,
+        [name]: { balance: 50, betCount: s[name]?.betCount ?? 0 },
+      }));
       return null;
     },
     [userRegistry],
@@ -220,8 +229,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setBets((bs) =>
         bs.map((b) => (b.id === betId ? { ...b, placed: { side, amount } } : b)),
       );
+      if (user) {
+        setPlayerStats((s) => ({
+          ...s,
+          [user.name]: {
+            balance: s[user.name]?.balance ?? balance,
+            betCount: (s[user.name]?.betCount ?? 0) + 1,
+          },
+        }));
+      }
     },
-    [],
+    [user, balance],
   );
 
   const voteBet = useCallback(
@@ -252,7 +270,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             bet.placed.amount *
               (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst),
           );
-          setBalance((b) => b + winnings);
+          setBalance((b) => {
+            const newBal = b + winnings;
+            if (user) {
+              setPlayerStats((s) => ({
+                ...s,
+                [user.name]: { ...s[user.name], balance: newBal },
+              }));
+            }
+            return newBal;
+          });
         }
       }
 
@@ -323,6 +350,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       esmolas,
       requestEsmola,
       donateEsmola,
+      playerStats,
     }),
     [
       user, balance, login, logout, addBalance, spend,
@@ -331,6 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pending, votePending, suggestBet,
       bets, placeBet, voteBet,
       esmolas, requestEsmola, donateEsmola,
+      playerStats,
     ],
   );
 

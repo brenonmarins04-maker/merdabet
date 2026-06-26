@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useApp } from "@/lib/app-context";
+import { useApp, type PlayerStats } from "@/lib/app-context";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -26,7 +26,7 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
-  const { user, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, logout } = useApp();
+  const { user, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, logout, playerStats } = useApp();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -64,6 +64,9 @@ function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* Rankings */}
+        <RankingSection playerStats={playerStats} />
 
         {/* Actions */}
         <section className="grid grid-cols-2 gap-3">
@@ -268,6 +271,74 @@ function CreateGroupDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const MEDALS = ["🥇", "🥈", "🥉"];
+
+function RankingSection({ playerStats }: { playerStats: Record<string, PlayerStats> }) {
+  const entries = Object.entries(playerStats);
+
+  const topLocos = [...entries]
+    .sort((a, b) => b[1].betCount - a[1].betCount)
+    .slice(0, 3);
+
+  const topRicos = [...entries]
+    .sort((a, b) => b[1].balance - a[1].balance)
+    .slice(0, 3);
+
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="grid grid-cols-2 gap-3">
+      {/* Os + Loucos */}
+      <div className="rounded-2xl border border-border/60 bg-card p-3">
+        <p className="mb-2 text-center text-[11px] font-black uppercase tracking-widest text-[color:var(--neon-purple)]">
+          🤪 Os + Loucos
+        </p>
+        {topLocos.length === 0 ? (
+          <p className="text-center text-xs text-muted-foreground">Ninguém apostou ainda</p>
+        ) : (
+          <ol className="space-y-1.5">
+            {topLocos.map(([name, stats], i) => (
+              <li key={name} className="flex items-center gap-2">
+                <span className="text-lg">{MEDALS[i]}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-black">{name}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {stats.betCount} aposta{stats.betCount !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      {/* Os + Ricos */}
+      <div className="rounded-2xl border border-border/60 bg-card p-3">
+        <p className="mb-2 text-center text-[11px] font-black uppercase tracking-widest text-green-400">
+          💰 Os + Ricos
+        </p>
+        {topRicos.length === 0 ? (
+          <p className="text-center text-xs text-muted-foreground">Ninguém tem grana ainda</p>
+        ) : (
+          <ol className="space-y-1.5">
+            {topRicos.map(([name, stats], i) => (
+              <li key={name} className="flex items-center gap-2">
+                <span className="text-lg">{MEDALS[i]}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-black">{name}</p>
+                  <p className="text-[10px] font-bold tabular-nums text-green-400">
+                    {stats.balance} conto
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </section>
   );
 }
 
