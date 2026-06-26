@@ -159,12 +159,16 @@ function HomePage() {
           </ul>
         </section>
 
-        <button
-          onClick={() => { logout(); navigate({ to: "/auth" }); }}
-          className="mx-auto mt-6 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
-        >
-          <LogOut className="h-3 w-3" /> sair
-        </button>
+        <div className="mx-auto mt-6 flex items-center gap-4">
+          <button
+            onClick={() => { logout(); navigate({ to: "/auth" }); }}
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <LogOut className="h-3 w-3" /> sair
+          </button>
+          <span className="text-xs text-muted-foreground/50">·</span>
+          <span className="text-xs text-muted-foreground/50">criado por buzz</span>
+        </div>
       </main>
 
       <JoinDialog
@@ -230,6 +234,7 @@ function CreateGroupDialog({
           <Input
             placeholder="Senha do grupo"
             type="password"
+            autoComplete="off"
             className="h-12"
             value={pass}
             onChange={(e) => setPass(e.target.value)}
@@ -375,7 +380,7 @@ function GroupSettingsDialog({
             <DialogHeader><DialogTitle>Editar grupo</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <Input placeholder="Nome do grupo" className="h-12" value={name} onChange={(e) => setName(e.target.value)} />
-              <Input placeholder="Senha do grupo" type="password" className="h-12" value={pass} onChange={(e) => setPass(e.target.value)} />
+              <Input placeholder="Senha do grupo" type="password" autoComplete="off" className="h-12" value={pass} onChange={(e) => setPass(e.target.value)} />
             </div>
             <DialogFooter className="gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setMode("menu")}>← Voltar</Button>
@@ -437,6 +442,7 @@ function JoinDialog({
         <Input
           placeholder="Senha do grupo"
           type="password"
+          autoComplete="off"
           className="h-12"
           value={pass}
           onChange={(e) => setPass(e.target.value)}

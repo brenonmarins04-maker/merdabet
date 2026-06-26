@@ -125,7 +125,7 @@ function AuthPage() {
               onChange={(e) => { setP(e.target.value); setPasswordErr(""); }}
               placeholder="••••••"
               className={`h-12 text-base ${passwordErr ? "border-red-500" : ""}`}
-              autoComplete="current-password"
+              autoComplete="off"
             />
             {passwordErr && (
               <p className="text-xs font-bold text-red-400">{passwordErr}</p>
