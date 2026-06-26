@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useApp } from "@/lib/app-context";
-import { isEnded, type Party } from "@/lib/mock-data";
+import { isEnded, type Bet, type Party, type PendingBet } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/group/$groupId")({
   head: () => ({ meta: [{ title: "MerdaBet — Grupo" }] }),
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/group/$groupId")({
 
 function GroupPage() {
   const { groupId } = Route.useParams();
-  const { groups, parties, esmolas, requestEsmola, donateEsmola, addParty, spend, confirmAttendance } =
+  const { groups, parties, pending, bets, esmolas, requestEsmola, donateEsmola, addParty, spend, confirmAttendance } =
     useApp();
   const navigate = useNavigate();
   const group = groups.find((g) => g.id === groupId);
@@ -64,6 +64,8 @@ function GroupPage() {
               <PartyCard
                 key={p.id}
                 party={p}
+                pendingBets={pending.filter((pb) => pb.partyId === p.id)}
+                liveBets={bets.filter((b) => b.partyId === p.id)}
                 onConfirmAttendance={() => {
                   confirmAttendance(p.id);
                   toast.success("Presença confirmada! +10 conto 🪙");
@@ -213,10 +215,14 @@ function statusBadge(s: Party["status"], ended: boolean) {
 
 function PartyCard({
   party,
+  pendingBets,
+  liveBets,
   onConfirmAttendance,
   onEnter,
 }: {
   party: Party;
+  pendingBets: PendingBet[];
+  liveBets: Bet[];
   onConfirmAttendance: () => void;
   onEnter: () => void;
 }) {
@@ -224,6 +230,7 @@ function PartyCard({
   const beforeStart = Date.now() < date.getTime();
   const ended = isEnded(party);
   const needsAttendance = beforeStart && !party.attending && !ended;
+  const hasBets = pendingBets.length > 0 || liveBets.length > 0;
 
   return (
     <li className="overflow-hidden rounded-2xl border border-border/60 bg-card transition hover:border-primary/60">
@@ -247,6 +254,42 @@ function PartyCard({
           </div>
           {statusBadge(party.status, ended)}
         </div>
+
+        {/* Bet previews */}
+        {hasBets && (
+          <div className="mt-3 space-y-1.5">
+            {pendingBets.map((pb) => (
+              <div
+                key={pb.id}
+                className="flex items-center gap-2 rounded-lg bg-[color:var(--neon-yellow)]/10 px-3 py-2"
+              >
+                <span className="text-sm">⚠️</span>
+                <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-yellow)]">
+                  {pb.description}
+                </p>
+                <span className="shrink-0 text-[10px] font-black tabular-nums text-[color:var(--neon-yellow)]">
+                  {pb.approvals}/{pb.needed}
+                </span>
+              </div>
+            ))}
+            {liveBets.map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center gap-2 rounded-lg bg-[color:var(--neon-green)]/10 px-3 py-2"
+              >
+                <span className="text-sm">🔥</span>
+                <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-green)]">
+                  {b.description}
+                </p>
+                <div className="shrink-0 flex gap-1.5 text-[10px] font-black tabular-nums">
+                  <span className="text-green-400">{b.oddFor.toFixed(2)}x</span>
+                  <span className="text-muted-foreground">/</span>
+                  <span className="text-[color:var(--neon-red)]">{b.oddAgainst.toFixed(2)}x</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="mt-3 flex gap-2">
           {needsAttendance && (
