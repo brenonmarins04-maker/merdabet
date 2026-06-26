@@ -116,7 +116,36 @@ function PartyPage() {
   const ended = isEnded(party);
   const partyPending = pending.filter((p) => p.partyId === partyId);
   const partyBets = bets.filter((b) => b.partyId === partyId);
-  const hasUnvotedPending = partyPending.some((p) => !p.approvedByMe && !p.rejectedByMe);
+
+  // Disputed live bets go to Pendentes while under vote
+  const disputedPending = partyBets.filter((b) => b.disputeStatus === "pending");
+  const livePartyBets = partyBets.filter((b) => b.disputeStatus !== "pending");
+
+  // Lock Ao Vivo if there are unvoted regular pending OR unvoted disputes
+  const hasUnvotedPending =
+    partyPending.some((p) => !p.approvedByMe && !p.rejectedByMe) ||
+    disputedPending.some((b) => !b.disputeVotedByMe);
+
+  // Sort: unvoted first, voted-rejected last
+  const sortedPartyPending = [...partyPending].sort((a, b) => {
+    const aU = !a.approvedByMe && !a.rejectedByMe;
+    const bU = !b.approvedByMe && !b.rejectedByMe;
+    if (aU && !bU) return -1;
+    if (!aU && bU) return 1;
+    if (a.rejectedByMe && !b.rejectedByMe) return 1;
+    if (!a.rejectedByMe && b.rejectedByMe) return -1;
+    return 0;
+  });
+
+  const sortedDisputedPending = [...disputedPending].sort((a, b) => {
+    const aU = !a.disputeVotedByMe;
+    const bU = !b.disputeVotedByMe;
+    if (aU && !bU) return -1;
+    if (!aU && bU) return 1;
+    if (a.disputeVotedByMe === "reject" && b.disputeVotedByMe !== "reject") return 1;
+    if (a.disputeVotedByMe !== "reject" && b.disputeVotedByMe === "reject") return -1;
+    return 0;
+  });
 
   return (
     <div className="min-h-dvh pb-32">
@@ -173,8 +202,13 @@ function PartyPage() {
           </TabsList>
 
           <TabsContent value="pending" className="mt-4 space-y-3">
-            {partyPending.length === 0 && <Empty msg="Nenhuma merda na fila ainda." />}
-            {partyPending.map((pb) => (
+            {sortedPartyPending.length === 0 && sortedDisputedPending.length === 0 && (
+              <Empty msg="Nenhuma merda na fila ainda." />
+            )}
+            {sortedDisputedPending.map((b) => (
+              <DisputePendingCard key={b.id} bet={b} onVote={voteDispute} />
+            ))}
+            {sortedPartyPending.map((pb) => (
               <PendingCard key={pb.id} pb={pb} onVote={votePending} />
             ))}
           </TabsContent>
@@ -189,8 +223,8 @@ function PartyPage() {
               </div>
             ) : (
               <>
-                {partyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
-                {[...partyBets]
+                {livePartyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
+                {[...livePartyBets]
                   .sort((a, b) => b.placementsCount - a.placementsCount)
                   .map((b) => (
                     <BetCard key={b.id} bet={b} onRequestDispute={requestDispute} onVoteDispute={voteDispute} />
@@ -211,8 +245,8 @@ function PartyPage() {
                 </p>
               </div>
             )}
-            {partyBets.length === 0 && <Empty msg="Nada pra votar ainda." />}
-            {partyBets.map((b) => (
+            {livePartyBets.length === 0 && <Empty msg="Nada pra votar ainda." />}
+            {livePartyBets.map((b) => (
               <VoteCard key={b.id} bet={b} />
             ))}
           </TabsContent>
@@ -294,10 +328,75 @@ function PendingCard({ pb, onVote }: { pb: PendingBet; onVote: (id: string, v: "
   );
 }
 
+function DisputePendingCard({
+  bet,
+  onVote,
+}: {
+  bet: Bet;
+  onVote: (betId: string, vote: "approve" | "reject") => void;
+}) {
+  const voted = !!bet.disputeVotedByMe;
+  const disputeLabel =
+    bet.disputeType === "delete"
+      ? "🗑️ Excluir aposta"
+      : `📊 Mudar ODD → ${bet.disputeNewOdd?.toFixed(2)}x`;
+
+  return (
+    <div className="rounded-2xl border border-orange-400/40 bg-card p-4">
+      {!voted && (
+        <div className="mb-2 flex items-center gap-2 text-orange-400">
+          <span className="text-3xl">⚡</span>
+          <span className="text-xs font-black uppercase tracking-wider">Contestação! Vote aqui!</span>
+        </div>
+      )}
+
+      <p className="text-base font-bold leading-snug">{bet.description}</p>
+
+      <div className="mt-2 flex items-center gap-2 rounded-xl bg-orange-400/10 px-3 py-2">
+        <span className="text-xs font-black text-orange-400">{disputeLabel}</span>
+        <span className="ml-auto text-[10px] font-bold text-orange-400/70">
+          ODD atual: {bet.odd.toFixed(2)}x
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-center gap-3">
+        {voted ? (
+          <p className="flex-1 text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
+            {bet.disputeVotedByMe === "approve" ? "✓ Votou: aprovei" : "✗ Votou: rejeitei"}
+          </p>
+        ) : (
+          <>
+            <Button
+              onClick={() => { onVote(bet.id, "approve"); toast.success("Contestação aprovada 👍"); }}
+              className="h-11 flex-1 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+            >
+              👍 Aprovar
+            </Button>
+            <Button
+              onClick={() => { onVote(bet.id, "reject"); toast.success("Contestação rejeitada 👎"); }}
+              className="h-11 flex-1 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
+            >
+              👎 Rejeitar
+            </Button>
+          </>
+        )}
+        <div className="shrink-0 text-right">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            ✓ {bet.disputeApprovals}/{bet.disputeNeeded}
+          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">
+            ✗ {bet.disputeRejections}/{bet.disputeNeeded}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BetCard({
   bet,
   onRequestDispute,
-  onVoteDispute,
+  onVoteDispute: _onVoteDispute,
 }: {
   bet: Bet;
   onRequestDispute: (betId: string, type: "change_odd" | "delete", newOdd?: number) => void;
@@ -309,7 +408,6 @@ function BetCard({
   const [amt, setAmt] = useState("5");
 
   const canDispute = bet.disputeStatus === "none";
-  const disputePending = bet.disputeStatus === "pending";
   const disputeRejected = bet.disputeStatus === "rejected";
 
   return (
@@ -345,7 +443,7 @@ function BetCard({
           </button>
         )}
 
-        {canDispute ? (
+        {canDispute && (
           <button
             onClick={() => setDisputeOpen(true)}
             title="Contestar aposta"
@@ -353,11 +451,7 @@ function BetCard({
           >
             !
           </button>
-        ) : disputePending ? (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-400/20 text-sm text-orange-400 ring-1 ring-orange-400/60">
-            ⏳
-          </span>
-        ) : null}
+        )}
       </div>
 
       {/* Dispute rejected */}
@@ -365,43 +459,6 @@ function BetCard({
         <p className="mt-1.5 text-[11px] font-bold text-[color:var(--neon-red)]">
           ✗ Pedido negado — aposta continua normal
         </p>
-      )}
-
-      {/* Dispute pending voting */}
-      {disputePending && (
-        <div className="mt-2 rounded-xl border border-orange-400/30 bg-orange-400/10 p-2">
-          <div className="flex items-center gap-2">
-            <p className="flex-1 text-xs font-bold text-orange-400">
-              ⚡{" "}
-              {bet.disputeType === "delete"
-                ? "Excluir aposta"
-                : `ODD → ${bet.disputeNewOdd?.toFixed(2)}x`}
-              <span className="ml-1 font-normal text-orange-400/70">
-                {bet.disputeApprovals}/{bet.disputeNeeded}
-              </span>
-            </p>
-            {bet.disputeVotedByMe ? (
-              <span className="text-xs font-bold text-muted-foreground">
-                {bet.disputeVotedByMe === "approve" ? "✓ Aprovei" : "✗ Rejeitei"}
-              </span>
-            ) : (
-              <div className="flex gap-1.5">
-                <button
-                  onClick={() => { onVoteDispute(bet.id, "approve"); toast.success("Aprovado!"); }}
-                  className="h-7 rounded-lg bg-[color:var(--neon-green)] px-3 text-xs font-black text-zinc-950"
-                >
-                  👍
-                </button>
-                <button
-                  onClick={() => { onVoteDispute(bet.id, "reject"); toast.success("Rejeitado!"); }}
-                  className="h-7 rounded-lg bg-[color:var(--neon-red)] px-3 text-xs font-black text-white"
-                >
-                  👎
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {/* Bet dialog */}
