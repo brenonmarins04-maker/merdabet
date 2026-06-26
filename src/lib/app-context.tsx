@@ -80,6 +80,9 @@ type DbPendingBet = {
 type DbBet = {
   id: string; party_id: string; description: string;
   odd: number; votes_happened: number; votes_not: number; resolved: string | null;
+  dispute_type: string | null; dispute_new_odd: number | null;
+  dispute_approvals: number; dispute_rejections: number;
+  dispute_needed: number; dispute_status: string;
 };
 type DbEsmola = { id: string; group_id: string; user_id: string; amount: number; donated: boolean };
 
@@ -116,6 +119,7 @@ function mapBet(
   r: DbBet,
   placedMap: Map<string, number>,
   votedMap: Map<string, "happened" | "not">,
+  disputeVotedMap: Map<string, "approve" | "reject">,
 ): Bet {
   const placed = placedMap.get(r.id);
   const voted = votedMap.get(r.id);
@@ -126,6 +130,13 @@ function mapBet(
     resolved: r.resolved as Bet["resolved"],
     placed: placed !== undefined ? { amount: placed } : undefined,
     voted,
+    disputeType: r.dispute_type as Bet["disputeType"],
+    disputeNewOdd: r.dispute_new_odd ?? undefined,
+    disputeApprovals: r.dispute_approvals ?? 0,
+    disputeRejections: r.dispute_rejections ?? 0,
+    disputeNeeded: r.dispute_needed ?? 1,
+    disputeStatus: (r.dispute_status ?? "none") as Bet["disputeStatus"],
+    disputeVotedByMe: disputeVotedMap.get(r.id),
   };
 }
 
@@ -160,6 +171,8 @@ type Ctx = {
   bets: Bet[];
   placeBet: (betId: string, amount: number) => void;
   voteBet: (betId: string, vote: "happened" | "not") => VoteBetResult;
+  requestDispute: (betId: string, type: "change_odd" | "delete", newOdd?: number) => void;
+  voteDispute: (betId: string, vote: "approve" | "reject") => void;
 
   playerStats: Record<string, PlayerStats>;
 
@@ -189,6 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const rejectedPendingIdsRef = useRef<Set<string>>(new Set());
   const placedMapRef = useRef<Map<string, number>>(new Map());
   const votedMapRef = useRef<Map<string, "happened" | "not">>(new Map());
+  const disputeVotedMapRef = useRef<Map<string, "approve" | "reject">>(new Map());
 
   // ─── Data loading ────────────────────────────────────────────────────────────
 
@@ -203,6 +217,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       betsRes,
       placementsRes,
       betVotesRes,
+      disputeVotesRes,
       esmolasRes,
       usersRes,
     ] = await Promise.all([
@@ -215,6 +230,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
       supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
+      supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("esmolas").select("*").order("created_at", { ascending: false }),
       supabase.from("users").select("id, balance, bet_count"),
     ]);
@@ -237,18 +253,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const votedMap = new Map<string, "happened" | "not">(
       (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not"] as [string, "happened" | "not"]),
     );
+    const disputeVotedMap = new Map<string, "approve" | "reject">(
+      (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
+    );
 
     attendedIdsRef.current = attendedIds;
     approvedPendingIdsRef.current = approvedIds;
     rejectedPendingIdsRef.current = rejectedIds;
     placedMapRef.current = placedMap;
     votedMapRef.current = votedMap;
+    disputeVotedMapRef.current = disputeVotedMap;
 
     setGroups((groupsRes.data ?? []).map(mapGroup));
     setJoined((joinedRes.data ?? []).map((r: { group_id: string }) => r.group_id));
     setParties((partiesRes.data ?? []).map((r: DbParty) => mapParty(r, attendedIds)));
     setPending((pendingRes.data ?? []).map((r: DbPendingBet) => mapPendingBet(r, approvedIds, rejectedIds)));
-    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap)));
+    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap)));
     setEsmolas((esmolasRes.data ?? []).map(mapEsmola));
 
     const stats: Record<string, PlayerStats> = {};
@@ -293,10 +313,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshBets = useCallback(async (username: string) => {
-    const [betsRes, placementsRes, betVotesRes] = await Promise.all([
+    const [betsRes, placementsRes, betVotesRes, disputeVotesRes] = await Promise.all([
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
       supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
+      supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
     ]);
     const placedMap = new Map<string, number>(
       (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
@@ -304,9 +325,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const votedMap = new Map<string, "happened" | "not">(
       (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not"] as [string, "happened" | "not"]),
     );
+    const disputeVotedMap = new Map<string, "approve" | "reject">(
+      (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
+    );
     placedMapRef.current = placedMap;
     votedMapRef.current = votedMap;
-    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap)));
+    disputeVotedMapRef.current = disputeVotedMap;
+    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap)));
   }, []);
 
   const refreshPlayerStats = useCallback(async () => {
@@ -612,6 +637,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             odd: promoted.odd,
             votesHappened: 0,
             votesNot: 0,
+            disputeApprovals: 0,
+            disputeRejections: 0,
+            disputeNeeded: 1,
+            disputeStatus: "none",
           };
           setBets((bs) => [newBet, ...bs]);
           // DB: insert bet, delete pending
@@ -744,6 +773,110 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bets, user, balance],
   );
 
+  // ─── Dispute ─────────────────────────────────────────────────────────────────
+
+  const requestDispute = useCallback(
+    (betId: string, type: "change_odd" | "delete", newOdd?: number) => {
+      if (!user) return;
+      const bet = bets.find((b) => b.id === betId);
+      if (!bet || bet.disputeStatus !== "none") return;
+
+      const party = parties.find((p) => p.id === bet.partyId);
+      const group = groups.find((g) => g.id === party?.groupId);
+      const members = group?.members ?? 1;
+      const needed = Math.max(1, Math.ceil(members / 3));
+
+      setBets((prev) =>
+        prev.map((b) =>
+          b.id === betId
+            ? { ...b, disputeType: type, disputeNewOdd: newOdd, disputeApprovals: 0, disputeRejections: 0, disputeNeeded: needed, disputeStatus: "pending" }
+            : b,
+        ),
+      );
+      supabase
+        .from("bets")
+        .update({ dispute_type: type, dispute_new_odd: newOdd ?? null, dispute_approvals: 0, dispute_rejections: 0, dispute_needed: needed, dispute_status: "pending" })
+        .eq("id", betId)
+        .then(() => {});
+    },
+    [user, bets, parties, groups],
+  );
+
+  const voteDispute = useCallback(
+    (betId: string, vote: "approve" | "reject") => {
+      if (!user) return;
+      const bet = bets.find((b) => b.id === betId);
+      if (!bet || bet.disputeStatus !== "pending" || bet.disputeVotedByMe) return;
+
+      const newApprovals = vote === "approve" ? bet.disputeApprovals + 1 : bet.disputeApprovals;
+      const newRejections = vote === "reject" ? bet.disputeRejections + 1 : bet.disputeRejections;
+
+      let newStatus: Bet["disputeStatus"] = "pending";
+      if (newApprovals >= bet.disputeNeeded) newStatus = "approved";
+      else if (newRejections >= bet.disputeNeeded) newStatus = "rejected";
+
+      disputeVotedMapRef.current = new Map([...disputeVotedMapRef.current, [betId, vote]]);
+      supabase.from("bet_dispute_votes").insert({ bet_id: betId, user_id: user.name, vote }).then(() => {});
+
+      if (newStatus === "approved" && bet.disputeType === "delete") {
+        if (bet.placed) {
+          const refundedBal = balance + bet.placed.amount;
+          setBalance(refundedBal);
+          supabase.from("users").update({ balance: refundedBal }).eq("id", user.name).then(() => {});
+        }
+        setBets((prev) => prev.filter((b) => b.id !== betId));
+        // Refund all placers then delete the bet
+        supabase
+          .from("bet_placements")
+          .select("user_id, amount")
+          .eq("bet_id", betId)
+          .then(({ data }) => {
+            if (data) {
+              for (const p of data as { user_id: string; amount: number }[]) {
+                supabase
+                  .from("users")
+                  .select("balance")
+                  .eq("id", p.user_id)
+                  .single()
+                  .then(({ data: u }) => {
+                    if (u) supabase.from("users").update({ balance: (u as { balance: number }).balance + p.amount }).eq("id", p.user_id).then(() => {});
+                  });
+              }
+            }
+            supabase.from("bets").delete().eq("id", betId).then(() => {});
+          });
+      } else if (newStatus === "approved" && bet.disputeType === "change_odd") {
+        const updatedOdd = bet.disputeNewOdd ?? bet.odd;
+        setBets((prev) =>
+          prev.map((b) =>
+            b.id === betId
+              ? { ...b, odd: updatedOdd, disputeStatus: "approved", disputeApprovals: newApprovals, disputeVotedByMe: vote }
+              : b,
+          ),
+        );
+        supabase
+          .from("bets")
+          .update({ odd: updatedOdd, dispute_status: "approved", dispute_approvals: newApprovals })
+          .eq("id", betId)
+          .then(() => {});
+      } else {
+        setBets((prev) =>
+          prev.map((b) =>
+            b.id === betId
+              ? { ...b, disputeApprovals: newApprovals, disputeRejections: newRejections, disputeStatus: newStatus, disputeVotedByMe: vote }
+              : b,
+          ),
+        );
+        supabase
+          .from("bets")
+          .update({ dispute_approvals: newApprovals, dispute_rejections: newRejections, dispute_status: newStatus })
+          .eq("id", betId)
+          .then(() => {});
+      }
+    },
+    [bets, user, balance],
+  );
+
   // ─── Esmola ───────────────────────────────────────────────────────────────────
 
   const requestEsmola = useCallback(
@@ -772,7 +905,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       groups, joinedGroupIds, createGroup, joinGroup, deleteGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
-      bets, placeBet, voteBet,
+      bets, placeBet, voteBet, requestDispute, voteDispute,
       playerStats,
       esmolas, requestEsmola, donateEsmola,
     }),
@@ -781,7 +914,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       groups, joinedGroupIds, createGroup, joinGroup, deleteGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
-      bets, placeBet, voteBet,
+      bets, placeBet, voteBet, requestDispute, voteDispute,
       playerStats,
       esmolas, requestEsmola, donateEsmola,
     ],

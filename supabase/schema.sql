@@ -2,6 +2,7 @@
 -- Run this in Supabase SQL Editor to set up the database from scratch.
 -- Safe to re-run: uses DROP IF EXISTS cascade.
 
+drop table if exists bet_dispute_votes cascade;
 drop table if exists bet_votes cascade;
 drop table if exists bet_placements cascade;
 drop table if exists bets cascade;
@@ -97,6 +98,12 @@ create table bets (
   votes_happened integer not null default 0,
   votes_not integer not null default 0,
   resolved text check (resolved in ('happened', 'not')),
+  dispute_type text check (dispute_type in ('change_odd', 'delete')),
+  dispute_new_odd numeric(5,2),
+  dispute_approvals integer not null default 0,
+  dispute_rejections integer not null default 0,
+  dispute_needed integer not null default 1,
+  dispute_status text not null default 'none' check (dispute_status in ('none', 'pending', 'approved', 'rejected')),
   created_at timestamptz default now()
 );
 
@@ -116,6 +123,14 @@ create table bet_votes (
   primary key (bet_id, user_id)
 );
 
+-- Dispute votes on live bets
+create table bet_dispute_votes (
+  bet_id text not null references bets(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  vote text not null check (vote in ('approve', 'reject')),
+  primary key (bet_id, user_id)
+);
+
 -- ─── RLS: open anon access (custom auth, no Supabase Auth) ───────────────────
 -- Disable RLS on all tables so the anon key can read and write freely.
 
@@ -130,6 +145,7 @@ alter table pending_bet_votes disable row level security;
 alter table bets disable row level security;
 alter table bet_placements disable row level security;
 alter table bet_votes disable row level security;
+alter table bet_dispute_votes disable row level security;
 
 -- ─── Realtime: enable on key tables ──────────────────────────────────────────
 alter publication supabase_realtime add table users;

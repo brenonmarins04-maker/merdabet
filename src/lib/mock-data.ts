@@ -10,6 +10,14 @@ export type Bet = {
   votesHappened: number;
   votesNot: number;
   resolved?: "happened" | "not";
+  // Dispute fields
+  disputeType?: "change_odd" | "delete";
+  disputeNewOdd?: number;
+  disputeApprovals: number;
+  disputeRejections: number;
+  disputeNeeded: number;
+  disputeStatus: "none" | "pending" | "approved" | "rejected";
+  disputeVotedByMe?: "approve" | "reject";
 };
 
 export type PendingBet = {

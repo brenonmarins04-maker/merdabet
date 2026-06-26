@@ -99,7 +99,7 @@ function OddsInput({
 
 function PartyPage() {
   const { partyId } = Route.useParams();
-  const { parties, pending, bets, votePending, suggestBet } = useApp();
+  const { parties, pending, bets, votePending, suggestBet, requestDispute, voteDispute } = useApp();
   const party = parties.find((p) => p.id === partyId);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("pending");
@@ -141,7 +141,7 @@ function PartyPage() {
               Festa encerrada!
             </p>
             <p className="mt-1 text-sm font-bold text-[color:var(--neon-yellow)]/80">
-              Vai na aba Votação e registra o que aconteceu!
+              Vai na aba ACONTECEU? e registra o que aconteceu!
             </p>
           </div>
         )}
@@ -167,7 +167,7 @@ function PartyPage() {
               Ao Vivo
             </TabsTrigger>
             <TabsTrigger value="vote" className="relative text-xs font-bold uppercase">
-              Votação
+              ACONTECEU?
               {ended && <span className="ml-1 text-base">🗳️</span>}
             </TabsTrigger>
           </TabsList>
@@ -191,7 +191,7 @@ function PartyPage() {
               <>
                 {partyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
                 {partyBets.map((b) => (
-                  <BetCard key={b.id} bet={b} />
+                  <BetCard key={b.id} bet={b} onRequestDispute={requestDispute} onVoteDispute={voteDispute} />
                 ))}
               </>
             )}
@@ -292,19 +292,96 @@ function PendingCard({ pb, onVote }: { pb: PendingBet; onVote: (id: string, v: "
   );
 }
 
-function BetCard({ bet }: { bet: Bet }) {
+function BetCard({
+  bet,
+  onRequestDispute,
+  onVoteDispute,
+}: {
+  bet: Bet;
+  onRequestDispute: (betId: string, type: "change_odd" | "delete", newOdd?: number) => void;
+  onVoteDispute: (betId: string, vote: "approve" | "reject") => void;
+}) {
   const { placeBet, spend } = useApp();
-  const [open, setOpen] = useState(false);
+  const [betOpen, setBetOpen] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
   const [amt, setAmt] = useState("5");
 
+  const canDispute = bet.disputeStatus === "none";
+  const disputePending = bet.disputeStatus === "pending";
+  const disputeRejected = bet.disputeStatus === "rejected";
+
   return (
-    <div className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">
-      <p className="text-base font-bold leading-snug">{bet.description}</p>
+    <div className="relative space-y-3 rounded-2xl border border-border/60 bg-card p-4">
+      {/* Small red dispute trigger button */}
+      {canDispute && (
+        <button
+          onClick={() => setDisputeOpen(true)}
+          title="Pedir alteração ou exclusão"
+          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color:var(--neon-red)]/20 text-[10px] font-black text-[color:var(--neon-red)] ring-1 ring-[color:var(--neon-red)]/60 hover:bg-[color:var(--neon-red)]/40"
+        >
+          !
+        </button>
+      )}
+      {disputePending && (
+        <button
+          disabled
+          title="Pedido em andamento"
+          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-orange-400/20 text-[10px] font-black text-orange-400 ring-1 ring-orange-400/60"
+        >
+          ⏳
+        </button>
+      )}
+
+      <p className="pr-7 text-base font-bold leading-snug">{bet.description}</p>
 
       <div className="flex items-center justify-center rounded-xl bg-green-400/10 px-3 py-3">
         <p className="text-[10px] font-bold uppercase tracking-wider text-green-400">ODD</p>
         <p className="ml-2 text-3xl font-black tabular-nums text-green-400">{bet.odd.toFixed(2)}x</p>
       </div>
+
+      {/* Dispute rejected badge */}
+      {disputeRejected && (
+        <div className="rounded-xl border border-[color:var(--neon-red)]/30 bg-[color:var(--neon-red)]/10 px-3 py-2 text-center">
+          <p className="text-xs font-black uppercase tracking-wider text-[color:var(--neon-red)]">
+            ✗ Pedido de alteração negado
+          </p>
+        </div>
+      )}
+
+      {/* Dispute pending voting banner */}
+      {disputePending && (
+        <div className="rounded-xl border border-orange-400/40 bg-orange-400/10 p-3">
+          <p className="mb-2 text-center text-xs font-black uppercase tracking-wider text-orange-400">
+            {bet.disputeType === "delete" ? "⚡ Pedido de EXCLUSÃO" : "⚡ Pedido de MUDANÇA DE ODD"}
+            {bet.disputeType === "change_odd" && bet.disputeNewOdd && (
+              <span className="ml-1">→ {bet.disputeNewOdd.toFixed(2)}x</span>
+            )}
+          </p>
+          <p className="mb-2 text-center text-[10px] text-orange-400/80">
+            Aprovações: {bet.disputeApprovals}/{bet.disputeNeeded}
+          </p>
+          {bet.disputeVotedByMe ? (
+            <p className="text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
+              {bet.disputeVotedByMe === "approve" ? "✓ Você aprovou" : "✗ Você rejeitou"}
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={() => { onVoteDispute(bet.id, "approve"); toast.success("Aprovado!"); }}
+                className="h-9 bg-[color:var(--neon-green)] text-xs font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+              >
+                👍 Aprovar
+              </Button>
+              <Button
+                onClick={() => { onVoteDispute(bet.id, "reject"); toast.success("Rejeitado!"); }}
+                className="h-9 bg-[color:var(--neon-red)] text-xs font-black text-white hover:bg-[color:var(--neon-red)]/90"
+              >
+                👎 Rejeitar
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {bet.placed ? (
         <div className="rounded-xl border border-green-400/40 bg-green-400/10 p-3 text-center">
@@ -320,14 +397,15 @@ function BetCard({ bet }: { bet: Bet }) {
         </div>
       ) : (
         <Button
-          onClick={() => { setOpen(true); setAmt("5"); }}
+          onClick={() => { setBetOpen(true); setAmt("5"); }}
           className="h-12 w-full bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
         >
           Apostar
         </Button>
       )}
 
-      <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      {/* Bet dialog */}
+      <Dialog open={betOpen} onOpenChange={(o) => !o && setBetOpen(false)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Apostar</DialogTitle>
@@ -360,7 +438,7 @@ function BetCard({ bet }: { bet: Bet }) {
                 if (!spend(n)) { toast.error("Sem conto suficiente"); return; }
                 placeBet(bet.id, n);
                 toast.success(`Aposta de ${n} conto confirmada`);
-                setOpen(false);
+                setBetOpen(false);
               }}
             >
               Confirmar Aposta
@@ -368,6 +446,17 @@ function BetCard({ bet }: { bet: Bet }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dispute request dialog */}
+      <DisputeRequestDialog
+        open={disputeOpen}
+        onOpenChange={setDisputeOpen}
+        currentOdd={bet.odd}
+        onConfirm={(type, newOdd) => {
+          onRequestDispute(bet.id, type, newOdd);
+          toast.success("Pedido enviado para votação!");
+        }}
+      />
     </div>
   );
 }
@@ -432,6 +521,77 @@ function VoteCard({ bet }: { bet: Bet }) {
         </div>
       )}
     </div>
+  );
+}
+
+function DisputeRequestDialog({
+  open,
+  onOpenChange,
+  currentOdd,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  currentOdd: number;
+  onConfirm: (type: "change_odd" | "delete", newOdd?: number) => void;
+}) {
+  const [type, setType] = useState<"change_odd" | "delete">("change_odd");
+  const [newOdd, setNewOdd] = useState(currentOdd);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Contestar aposta</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Pede para o grupo votar. Se aprovado, a aposta é alterada ou excluída.
+        </p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setType("change_odd")}
+              className={`rounded-xl border p-3 text-left text-sm font-bold transition ${type === "change_odd" ? "border-[color:var(--neon-purple)] bg-[color:var(--neon-purple)]/20 text-[color:var(--neon-purple)]" : "border-border/60 text-muted-foreground hover:bg-card"}`}
+            >
+              📊 Mudar a ODD
+            </button>
+            <button
+              onClick={() => setType("delete")}
+              className={`rounded-xl border p-3 text-left text-sm font-bold transition ${type === "delete" ? "border-[color:var(--neon-red)] bg-[color:var(--neon-red)]/20 text-[color:var(--neon-red)]" : "border-border/60 text-muted-foreground hover:bg-card"}`}
+            >
+              🗑️ Excluir aposta
+            </button>
+          </div>
+          {type === "change_odd" && (
+            <OddsInput
+              value={newOdd}
+              onChange={setNewOdd}
+              label="Nova ODD"
+              colorClass="text-[color:var(--neon-purple)]"
+            />
+          )}
+          {type === "delete" && (
+            <div className="rounded-xl border border-[color:var(--neon-red)]/40 bg-[color:var(--neon-red)]/10 p-3 text-center">
+              <p className="text-xs font-bold text-[color:var(--neon-red)]">
+                Se aprovado, quem apostou recebe o dinheiro de volta.
+              </p>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            className="h-12 w-full font-bold"
+            onClick={() => {
+              if (type === "change_odd" && newOdd < 1.01) { toast.error("ODD precisa ser > 1.01"); return; }
+              onConfirm(type, type === "change_odd" ? newOdd : undefined);
+              onOpenChange(false);
+            }}
+          >
+            Enviar para votação
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
