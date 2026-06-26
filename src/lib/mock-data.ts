@@ -12,6 +12,7 @@ export type Bet = {
   resolved?: "happened" | "not";
   placementsCount: number;
   totalWagered: number;
+  topPlacer?: { userId: string; amount: number };
   // Dispute fields
   disputeType?: "change_odd" | "delete";
   disputeNewOdd?: number;

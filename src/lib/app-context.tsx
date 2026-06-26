@@ -121,6 +121,7 @@ function mapBet(
   placedMap: Map<string, number>,
   votedMap: Map<string, "happened" | "not">,
   disputeVotedMap: Map<string, "approve" | "reject">,
+  topPlacerMap: Map<string, { userId: string; amount: number }>,
 ): Bet {
   const placed = placedMap.get(r.id);
   const voted = votedMap.get(r.id);
@@ -131,6 +132,7 @@ function mapBet(
     resolved: r.resolved as Bet["resolved"],
     placementsCount: r.placements_count ?? 0,
     totalWagered: r.total_wagered ?? 0,
+    topPlacer: topPlacerMap.get(r.id),
     placed: placed !== undefined ? { amount: placed } : undefined,
     voted,
     disputeType: r.dispute_type as Bet["disputeType"],
@@ -207,6 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const placedMapRef = useRef<Map<string, number>>(new Map());
   const votedMapRef = useRef<Map<string, "happened" | "not">>(new Map());
   const disputeVotedMapRef = useRef<Map<string, "approve" | "reject">>(new Map());
+  const topPlacerMapRef = useRef<Map<string, { userId: string; amount: number }>>(new Map());
 
   // ─── Data loading ────────────────────────────────────────────────────────────
 
@@ -224,6 +227,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       disputeVotesRes,
       esmolasRes,
       usersRes,
+      allPlacementsRes,
     ] = await Promise.all([
       supabase.from("groups").select("*").order("created_at", { ascending: false }),
       supabase.from("group_members").select("group_id").eq("user_id", username),
@@ -237,6 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("esmolas").select("*").order("created_at", { ascending: false }),
       supabase.from("users").select("id, balance, bet_count"),
+      supabase.from("bet_placements").select("bet_id, user_id, amount"),
     ]);
 
     // Build per-user sets/maps
@@ -261,18 +266,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
     );
 
+    const topPlacerMap = new Map<string, { userId: string; amount: number }>();
+    for (const p of (allPlacementsRes.data ?? []) as { bet_id: string; user_id: string; amount: number }[]) {
+      const cur = topPlacerMap.get(p.bet_id);
+      if (!cur || p.amount > cur.amount) topPlacerMap.set(p.bet_id, { userId: p.user_id, amount: p.amount });
+    }
+
     attendedIdsRef.current = attendedIds;
     approvedPendingIdsRef.current = approvedIds;
     rejectedPendingIdsRef.current = rejectedIds;
     placedMapRef.current = placedMap;
     votedMapRef.current = votedMap;
     disputeVotedMapRef.current = disputeVotedMap;
+    topPlacerMapRef.current = topPlacerMap;
 
     setGroups((groupsRes.data ?? []).map(mapGroup));
     setJoined((joinedRes.data ?? []).map((r: { group_id: string }) => r.group_id));
     setParties((partiesRes.data ?? []).map((r: DbParty) => mapParty(r, attendedIds)));
     setPending((pendingRes.data ?? []).map((r: DbPendingBet) => mapPendingBet(r, approvedIds, rejectedIds)));
-    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap)));
+    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap, topPlacerMap)));
     setEsmolas((esmolasRes.data ?? []).map(mapEsmola));
 
     const stats: Record<string, PlayerStats> = {};
@@ -317,11 +329,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshBets = useCallback(async (username: string) => {
-    const [betsRes, placementsRes, betVotesRes, disputeVotesRes] = await Promise.all([
+    const [betsRes, placementsRes, betVotesRes, disputeVotesRes, allPlacementsRes] = await Promise.all([
       supabase.from("bets").select("*").order("created_at", { ascending: false }),
       supabase.from("bet_placements").select("bet_id, amount").eq("user_id", username),
       supabase.from("bet_votes").select("bet_id, vote").eq("user_id", username),
       supabase.from("bet_dispute_votes").select("bet_id, vote").eq("user_id", username),
+      supabase.from("bet_placements").select("bet_id, user_id, amount"),
     ]);
     const placedMap = new Map<string, number>(
       (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
@@ -332,10 +345,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const disputeVotedMap = new Map<string, "approve" | "reject">(
       (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
     );
+    const topPlacerMap = new Map<string, { userId: string; amount: number }>();
+    for (const p of (allPlacementsRes.data ?? []) as { bet_id: string; user_id: string; amount: number }[]) {
+      const cur = topPlacerMap.get(p.bet_id);
+      if (!cur || p.amount > cur.amount) topPlacerMap.set(p.bet_id, { userId: p.user_id, amount: p.amount });
+    }
     placedMapRef.current = placedMap;
     votedMapRef.current = votedMap;
     disputeVotedMapRef.current = disputeVotedMap;
-    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap)));
+    topPlacerMapRef.current = topPlacerMap;
+    setBets((betsRes.data ?? []).map((r: DbBet) => mapBet(r, placedMap, votedMap, disputeVotedMap, topPlacerMap)));
   }, []);
 
   const refreshPlayerStats = useCallback(async () => {
@@ -742,11 +761,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const currentPlacementsCount = currentBet?.placementsCount ?? 0;
       const currentTotalWagered = currentBet?.totalWagered ?? 0;
       setBets((prev) =>
-        prev.map((b) =>
-          b.id === betId
-            ? { ...b, placed: { amount }, placementsCount: b.placementsCount + 1, totalWagered: b.totalWagered + amount }
-            : b,
-        ),
+        prev.map((b) => {
+          if (b.id !== betId) return b;
+          const newTopPlacer =
+            !b.topPlacer || amount > b.topPlacer.amount
+              ? { userId: user.name, amount }
+              : b.topPlacer;
+          topPlacerMapRef.current.set(betId, newTopPlacer);
+          return { ...b, placed: { amount }, placementsCount: b.placementsCount + 1, totalWagered: b.totalWagered + amount, topPlacer: newTopPlacer };
+        }),
       );
       const newBetCount = (playerStats[user.name]?.betCount ?? 0) + 1;
       setPlayerStats((s) => ({

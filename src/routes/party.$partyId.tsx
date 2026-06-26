@@ -224,6 +224,7 @@ function PartyPage() {
             ) : (
               <>
                 {livePartyBets.length === 0 && <Empty msg="Sem apostas rolando." />}
+                <TopBetBanner bets={livePartyBets} />
                 {[...livePartyBets]
                   .sort((a, b) => b.placementsCount - a.placementsCount)
                   .map((b) => (
@@ -324,6 +325,27 @@ function PendingCard({ pb, onVote }: { pb: PendingBet; onVote: (id: string, v: "
           <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">✗ {pb.rejections ?? 0}/{pb.needed}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function TopBetBanner({ bets }: { bets: Bet[] }) {
+  const top = bets.reduce<{ bet: Bet; userId: string; amount: number } | null>((best, b) => {
+    if (!b.topPlacer) return best;
+    if (!best || b.topPlacer.amount > best.amount) return { bet: b, userId: b.topPlacer.userId, amount: b.topPlacer.amount };
+    return best;
+  }, null);
+
+  if (!top) return null;
+
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-[color:var(--neon-green)]/30 bg-[color:var(--neon-green)]/10 px-4 py-3">
+      <span className="text-xl">🔥</span>
+      <p className="text-sm leading-snug text-[color:var(--neon-green)]">
+        <span className="font-black">{top.userId}</span> apostou{" "}
+        <span className="font-black tabular-nums">{top.amount}c</span> em{" "}
+        <span className="font-bold italic">"{top.bet.description}"</span>
+      </p>
     </div>
   );
 }
