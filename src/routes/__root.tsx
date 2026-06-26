@@ -79,14 +79,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "MerdaBet" },
+      { name: "description", content: "Aposte nas merdas que vão acontecer nas festas." },
+      { name: "author", content: "MerdaBet" },
+      { name: "theme-color", content: "#0a0a0f" },
+      { property: "og:title", content: "MerdaBet" },
+      { property: "og:description", content: "Aposte nas merdas que vão acontecer nas festas." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
