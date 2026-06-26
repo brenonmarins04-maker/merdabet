@@ -140,7 +140,7 @@ function GroupPage() {
       {/* FAB */}
       <button
         onClick={() => setFabOpen(true)}
-        className="glow-purple fixed bottom-6 right-1/2 z-40 grid h-14 w-14 translate-x-[calc(50%+150px)] place-items-center rounded-full bg-primary text-primary-foreground"
+        className="glow-purple fixed bottom-6 right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-primary text-primary-foreground"
         aria-label="Adicionar festa"
       >
         <Plus className="h-6 w-6" />
