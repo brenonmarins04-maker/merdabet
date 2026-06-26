@@ -27,6 +27,7 @@ export const Route = createFileRoute("/")({
 
 function HomePage() {
   const { user, balance, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, updateGroup, logout, playerStats } = useApp();
+  const totalUsers = Object.keys(playerStats).length;
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -48,6 +49,17 @@ function HomePage() {
           <div className="absolute -right-6 -top-6 opacity-30">
             <PartyPopper className="h-28 w-28" />
           </div>
+          {totalUsers > 0 && (
+            <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-black/30 px-3 py-1.5 backdrop-blur-sm">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-green-400" />
+              </span>
+              <span className="text-[11px] font-black tabular-nums text-white/90">
+                {totalUsers} apostador{totalUsers !== 1 ? "es" : ""} ao vivo
+              </span>
+            </div>
+          )}
           <p className="text-xs font-bold uppercase tracking-widest text-white/70">
             Pense · Faça a ODD · Aposte
           </p>
