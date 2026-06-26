@@ -32,11 +32,11 @@ function HomePage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [joinDialogId, setJoinDialogId] = useState<string | null>(null);
 
-  if (!user) {
-    // simple gate: send to /auth
-    navigate({ to: "/auth" });
-    return null;
-  }
+  useEffect(() => {
+    if (!user) navigate({ to: "/auth" });
+  }, [user, navigate]);
+
+  if (!user) return null;
 
   const visible = groups;
 
