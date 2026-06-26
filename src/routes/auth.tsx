@@ -83,9 +83,13 @@ function AuthPage() {
           <h1 className="text-5xl font-black tracking-tighter text-neon-purple">
             MerdaBet
           </h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            As melhores merdas da festa pagam bem.
-          </p>
+          <div className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-card px-4 py-3">
+            <span className="text-xl">🤮</span>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-bold text-foreground">Luizinho tomar 5 beats e gorfar</span>{" "}
+              <span className="font-black text-green-400">ODD 1.2</span>
+            </p>
+          </div>
         </div>
 
         <form onSubmit={submit} className="space-y-4 rounded-2xl border border-border/60 bg-card p-6 shadow-2xl">

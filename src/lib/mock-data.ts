@@ -49,6 +49,7 @@ export type Group = {
   name: string;
   members: number;
   password: string;
+  createdBy: string;
 };
 
 export function isEnded(party: Party): boolean {

@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { LogOut, PartyPopper, Plus, Search, Users } from "lucide-react";
+import { LogOut, PartyPopper, Plus, Search, Trash2, Users } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,19 +26,18 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
-  const { user, groups, joinedGroupIds, createGroup, joinGroup, logout } = useApp();
+  const { user, groups, joinedGroupIds, createGroup, joinGroup, deleteGroup, logout } = useApp();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [joinDialogId, setJoinDialogId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) navigate({ to: "/auth" });
   }, [user, navigate]);
 
   if (!user) return null;
-
-  const visible = groups;
 
   return (
     <div className="min-h-dvh bg-background pb-24">
@@ -49,12 +48,21 @@ function HomePage() {
           <div className="absolute -right-6 -top-6 opacity-30">
             <PartyPopper className="h-28 w-28" />
           </div>
-          <p className="text-xs font-bold uppercase tracking-widest text-white/80">
-            Bem-vindo ao caos
+          <p className="text-xs font-bold uppercase tracking-widest text-white/70">
+            Pense · Faça a ODD · Aposte
           </p>
-          <h2 className="mt-1 text-2xl font-black leading-tight text-white">
+          <h2 className="mt-2 text-2xl font-black leading-tight text-white">
             Aposte nas merdas que vão acontecer nas festas 🍻
           </h2>
+          <div className="mt-4 flex items-center gap-3 rounded-xl bg-black/30 px-4 py-3">
+            <span className="text-2xl">🤮</span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-white">
+                Luizinho tomar 5 beats e gorfar
+              </p>
+              <p className="text-xs font-black text-green-400">ODD 1.2</p>
+            </div>
+          </div>
         </section>
 
         {/* Actions */}
@@ -88,52 +96,70 @@ function HomePage() {
             <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground">
               Seus grupos
             </h3>
-            <span className="text-xs text-muted-foreground">{visible.length} no rolê</span>
+            <span className="text-xs text-muted-foreground">{groups.length} no rolê</span>
           </div>
           <ul className="space-y-3">
-            {visible.map((g) => {
+            {groups.map((g) => {
               const joined = joinedGroupIds.includes(g.id);
+              const isOwner = g.createdBy === user.name;
               return (
                 <li
                   key={g.id}
                   className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card p-4"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-base font-bold">{g.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-base font-bold">{g.name}</p>
+                      {isOwner && (
+                        <span className="shrink-0 rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-primary">
+                          dono
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                       <Users className="h-3 w-3" /> {g.members} membros
                     </p>
                   </div>
-                  {joined ? (
-                    <Button
-                      asChild
-                      size="sm"
-                      className="h-10 px-4 font-bold"
-                    >
-                      <Link to="/group/$groupId" params={{ groupId: g.id }}>
-                        Abrir
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      className="h-10 px-4 font-bold"
-                      onClick={() => setJoinDialogId(g.id)}
-                    >
-                      Entrar
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {isOwner && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-9 w-9 p-0 text-muted-foreground hover:text-red-400"
+                        onClick={() => setDeleteConfirmId(g.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {joined ? (
+                      <Button asChild size="sm" className="h-10 px-4 font-bold">
+                        <Link to="/group/$groupId" params={{ groupId: g.id }}>
+                          Abrir
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="h-10 px-4 font-bold"
+                        onClick={() => setJoinDialogId(g.id)}
+                      >
+                        Entrar
+                      </Button>
+                    )}
+                  </div>
                 </li>
               );
             })}
+            {groups.length === 0 && (
+              <li className="rounded-2xl border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
+                Nenhum grupo ainda. Cria um ou entra em um!
+              </li>
+            )}
           </ul>
         </section>
 
         <button
-          onClick={() => {
-            logout();
-            navigate({ to: "/auth" });
-          }}
+          onClick={() => { logout(); navigate({ to: "/auth" }); }}
           className="mx-auto mt-6 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
         >
           <LogOut className="h-3 w-3" /> sair
@@ -150,6 +176,34 @@ function HomePage() {
           navigate({ to: "/group/$groupId", params: { groupId: id } });
         }}
       />
+
+      {/* Delete confirm dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={(o) => !o && setDeleteConfirmId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Apagar grupo?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Isso vai apagar o grupo e todas as festas dele permanentemente. Não tem volta.
+          </p>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteConfirmId(null)}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-red-500 font-bold text-white hover:bg-red-600"
+              onClick={() => {
+                if (!deleteConfirmId) return;
+                deleteGroup(deleteConfirmId);
+                setDeleteConfirmId(null);
+                toast.success("Grupo apagado.");
+              }}
+            >
+              Apagar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -248,10 +302,7 @@ function JoinDialog({
             className="h-12 w-full font-bold"
             onClick={() => {
               if (!g) return;
-              if (pass !== g.password) {
-                toast.error("Senha errada");
-                return;
-              }
+              if (pass !== g.password) { toast.error("Senha errada"); return; }
               setPass("");
               onJoined(g.id);
             }}

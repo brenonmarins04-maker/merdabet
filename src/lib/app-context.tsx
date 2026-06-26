@@ -41,6 +41,7 @@ type Ctx = {
   joinedGroupIds: string[];
   createGroup: (name: string, password: string) => Group;
   joinGroup: (id: string) => void;
+  deleteGroup: (id: string) => void;
 
   parties: Party[];
   addParty: (groupId: string, name: string, start: string, end: string) => void;
@@ -105,11 +106,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [balance],
   );
 
-  const createGroup = useCallback((name: string, password: string) => {
-    const g: Group = { id: `g${Date.now()}`, name, members: 1, password };
-    setGroups((gs) => [g, ...gs]);
-    setJoined((j) => [g.id, ...j]);
-    return g;
+  const createGroup = useCallback(
+    (name: string, password: string) => {
+      const g: Group = {
+        id: `g${Date.now()}`,
+        name,
+        members: 1,
+        password,
+        createdBy: user?.name ?? "",
+      };
+      setGroups((gs) => [g, ...gs]);
+      setJoined((j) => [g.id, ...j]);
+      return g;
+    },
+    [user],
+  );
+
+  const deleteGroup = useCallback((id: string) => {
+    setGroups((gs) => gs.filter((g) => g.id !== id));
+    setJoined((j) => j.filter((x) => x !== id));
+    setParties((ps) => ps.filter((p) => p.groupId !== id));
   }, []);
 
   const joinGroup = useCallback((id: string) => {
@@ -294,6 +310,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       joinedGroupIds,
       createGroup,
       joinGroup,
+      deleteGroup,
       parties,
       addParty,
       confirmAttendance,
@@ -309,7 +326,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       user, balance, login, logout, addBalance, spend,
-      groups, joinedGroupIds, createGroup, joinGroup,
+      groups, joinedGroupIds, createGroup, joinGroup, deleteGroup,
       parties, addParty, confirmAttendance,
       pending, votePending, suggestBet,
       bets, placeBet, voteBet,
