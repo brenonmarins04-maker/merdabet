@@ -24,7 +24,8 @@ type User = { name: string } | null;
 type Ctx = {
   user: User;
   balance: number;
-  login: (name: string) => void;
+  /** Returns null on success, or an error message string on failure. */
+  login: (name: string, password: string) => string | null;
   logout: () => void;
   addBalance: (n: number) => void;
   spend: (n: number) => boolean;
@@ -56,6 +57,7 @@ const AppContext = createContext<Ctx | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [balance, setBalance] = useState(0);
+  const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
   const [groups, setGroups] = useState<Group[]>(initialGroups);
   const [joinedGroupIds, setJoined] = useState<string[]>([]);
   const [parties, setParties] = useState<Party[]>(initialParties);
@@ -63,10 +65,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [bets, setBets] = useState<Bet[]>(initialBets);
   const [esmolas, setEsmolas] = useState<Esmola[]>(initialEsmolas);
 
-  const login = useCallback((name: string) => {
-    setUser({ name });
-    setBalance(50);
-  }, []);
+  const login = useCallback(
+    (name: string, password: string): string | null => {
+      if (name in userRegistry) {
+        if (userRegistry[name] !== password) {
+          return "Senha incorreta para este usuário.";
+        }
+        setUser({ name });
+        setBalance(50);
+        return null;
+      }
+      // new user — register
+      setUserRegistry((r) => ({ ...r, [name]: password }));
+      setUser({ name });
+      setBalance(50);
+      return null;
+    },
+    [userRegistry],
+  );
 
   const logout = useCallback(() => {
     setUser(null);

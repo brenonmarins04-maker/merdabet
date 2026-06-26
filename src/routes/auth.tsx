@@ -15,20 +15,61 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
+const USERNAME_RE = /^[a-z0-9_]+$/;
+
+function sanitizeUsername(raw: string) {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+}
+
 function AuthPage() {
   const { login } = useApp();
   const navigate = useNavigate();
   const [u, setU] = useState("");
   const [p, setP] = useState("");
+  const [usernameErr, setUsernameErr] = useState("");
+  const [passwordErr, setPasswordErr] = useState("");
+
+  function handleUsernameChange(raw: string) {
+    const clean = sanitizeUsername(raw);
+    setU(clean);
+    setUsernameErr("");
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!u.trim() || !p.trim()) {
-      toast.error("Preenche aí, parça");
+    setUsernameErr("");
+    setPasswordErr("");
+
+    if (!u) {
+      setUsernameErr("Preenche o usuário.");
       return;
     }
-    login(u.trim());
-    toast.success(`Bem-vindo, ${u}! 🪙 +50 contos`);
+    if (!USERNAME_RE.test(u)) {
+      setUsernameErr("Só letras minúsculas, números e _ (sem espaço).");
+      return;
+    }
+    if (u.length < 3) {
+      setUsernameErr("Mínimo 3 caracteres.");
+      return;
+    }
+    if (!p) {
+      setPasswordErr("Preenche a senha.");
+      return;
+    }
+    if (p.length < 4) {
+      setPasswordErr("Mínimo 4 caracteres.");
+      return;
+    }
+
+    const err = login(u, p);
+    if (err) {
+      setPasswordErr(err);
+      return;
+    }
+
+    toast.success(`Bem-vindo, ${u}! 🪙 +50 conto`);
     navigate({ to: "/" });
   }
 
@@ -54,12 +95,22 @@ function AuthPage() {
             </label>
             <Input
               value={u}
-              onChange={(e) => setU(e.target.value)}
+              onChange={(e) => handleUsernameChange(e.target.value)}
               placeholder="seu_apelido"
-              className="h-12 text-base"
-              autoComplete="off"
+              className={`h-12 text-base ${usernameErr ? "border-red-500" : ""}`}
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
             />
+            {usernameErr && (
+              <p className="text-xs font-bold text-red-400">{usernameErr}</p>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Só minúsculas, números e _ · sem espaço
+            </p>
           </div>
+
           <div className="space-y-1.5">
             <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Senha
@@ -67,10 +118,14 @@ function AuthPage() {
             <Input
               type="password"
               value={p}
-              onChange={(e) => setP(e.target.value)}
+              onChange={(e) => { setP(e.target.value); setPasswordErr(""); }}
               placeholder="••••••"
-              className="h-12 text-base"
+              className={`h-12 text-base ${passwordErr ? "border-red-500" : ""}`}
+              autoComplete="current-password"
             />
+            {passwordErr && (
+              <p className="text-xs font-bold text-red-400">{passwordErr}</p>
+            )}
           </div>
 
           <Button
@@ -81,7 +136,7 @@ function AuthPage() {
           </Button>
 
           <p className="pt-2 text-center text-xs text-muted-foreground">
-            Você começa com <span className="font-black text-[color:var(--coin)]">50 contos</span> de bônus.
+            Você começa com <span className="font-black text-green-400">50 conto</span> de bônus.
           </p>
         </form>
       </div>
