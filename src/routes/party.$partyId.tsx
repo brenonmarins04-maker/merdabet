@@ -322,6 +322,11 @@ function BetCard({
         <span className="shrink-0 rounded-lg bg-green-400/10 px-2.5 py-1.5 text-sm font-black tabular-nums text-green-400">
           {bet.odd.toFixed(2)}x
         </span>
+        {bet.placementsCount > 0 && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {bet.placementsCount}🧑
+          </span>
+        )}
 
         {bet.placed ? (
           <span className="flex-1 truncate text-xs text-muted-foreground">

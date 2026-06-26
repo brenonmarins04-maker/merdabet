@@ -268,9 +268,16 @@ function PartyCard({
                   <p className="min-w-0 flex-1 truncate text-xs font-bold text-[color:var(--neon-green)]">
                     {b.description}
                   </p>
-                  <span className="shrink-0 rounded-md bg-green-400/20 px-1.5 py-0.5 text-[10px] font-black tabular-nums text-green-400">
-                    {b.odd.toFixed(2)}x
-                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <span className="rounded-md bg-green-400/20 px-1.5 py-0.5 text-[10px] font-black tabular-nums text-green-400">
+                      {b.odd.toFixed(2)}x
+                    </span>
+                    {b.placementsCount > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {b.placementsCount}🧑
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             {liveBets.length > 3 && (
