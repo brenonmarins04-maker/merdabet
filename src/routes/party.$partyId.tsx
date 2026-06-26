@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Coins, Lock, PartyPopper, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
@@ -14,18 +14,97 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useApp } from "@/lib/app-context";
-import type { Bet, PendingBet } from "@/lib/mock-data";
+import { isEnded, type Bet, type PendingBet } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/party/$partyId")({
   head: () => ({ meta: [{ title: "MerdaBet — Festa" }] }),
   component: PartyPage,
 });
 
+// ─── Odds formatting helpers ─────────────────────────────────────────────────
+
+function displayOdd(digits: string): string {
+  if (!digits) return "";
+  if (digits.length === 1) return digits + ".";
+  if (digits.length === 2) return digits[0] + "." + digits[1];
+  if (digits.length === 3) return digits[0] + "." + digits.slice(1);
+  return digits.slice(0, 2) + "." + digits.slice(2);
+}
+
+function parseOddFromDigits(digits: string): number {
+  if (!digits) return 1.01;
+  const display = displayOdd(digits).replace(/\.$/, "");
+  return Math.max(1.01, parseFloat(display) || 1.01);
+}
+
+function digitsFromNumber(n: number): string {
+  return Math.round(n * 100).toString();
+}
+
+// ─── OddsInput component ──────────────────────────────────────────────────────
+
+function OddsInput({
+  value,
+  onChange,
+  onComplete,
+  label,
+  colorClass = "text-green-400",
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  onComplete?: () => void;
+  label: string;
+  colorClass?: string;
+}) {
+  const [digits, setDigits] = useState(() => digitsFromNumber(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key >= "0" && e.key <= "9") {
+      e.preventDefault();
+      const next = digits + e.key;
+      if (next.length > 4) return;
+      // integer part must be ≤ 99
+      const intPart = next.length <= 2 ? parseInt(next) : parseInt(next.slice(0, next.length - 2));
+      if (intPart > 99) return;
+      setDigits(next);
+      onChange(parseOddFromDigits(next));
+      if (next.length === 4) onComplete?.();
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      const next = digits.slice(0, -1);
+      setDigits(next);
+      onChange(parseOddFromDigits(next));
+    }
+  }
+
+  function handleFocus() {
+    setTimeout(() => inputRef.current?.select(), 0);
+  }
+
+  return (
+    <div>
+      <label className={`text-xs font-bold uppercase ${colorClass}`}>{label}</label>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        value={displayOdd(digits)}
+        onChange={() => {}}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        className={`mt-1 h-12 w-full rounded-md border border-input bg-background px-3 text-center text-xl font-black tabular-nums outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 ${colorClass}`}
+      />
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 function PartyPage() {
   const { partyId } = Route.useParams();
   const { parties, pending, bets, votePending, suggestBet } = useApp();
   const party = parties.find((p) => p.id === partyId);
-
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("pending");
 
@@ -38,42 +117,46 @@ function PartyPage() {
   }
 
   const startDate = new Date(party.start);
-
+  const ended = isEnded(party);
   const partyPending = pending.filter((p) => p.partyId === partyId);
   const partyBets = bets.filter((b) => b.partyId === partyId);
-
-  // Live tab is locked if there are any pending bets the user hasn't voted on yet
-  const hasUnvotedPending = partyPending.some(
-    (p) => !p.approvedByMe && !p.rejectedByMe,
-  );
+  const hasUnvotedPending = partyPending.some((p) => !p.approvedByMe && !p.rejectedByMe);
 
   return (
     <div className="min-h-dvh pb-32">
       <AppHeader back={`/group/${party.groupId}`} title={party.name} />
       <main className="mx-auto max-w-md space-y-6 px-4 pt-5">
+
+        {/* Header card */}
         <section className="bg-party-gradient relative overflow-hidden rounded-2xl p-5">
           <PartyPopper className="absolute -right-4 -top-4 h-24 w-24 opacity-25" />
           <p className="text-xs font-bold uppercase tracking-widest text-white/80">
             {startDate.toLocaleString("pt-BR", {
-              weekday: "short",
-              day: "2-digit",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
+              weekday: "short", day: "2-digit", month: "short",
+              hour: "2-digit", minute: "2-digit",
             })}
           </p>
-          <h2 className="mt-1 text-2xl font-black leading-tight text-white">
-            {party.name}
-          </h2>
+          <h2 className="mt-1 text-2xl font-black leading-tight text-white">{party.name}</h2>
         </section>
+
+        {/* Ended banner */}
+        {ended && (
+          <div className="rounded-2xl border-2 border-[color:var(--neon-yellow)] bg-[color:var(--neon-yellow)]/10 p-5 text-center">
+            <p className="text-4xl">🗳️</p>
+            <p className="mt-2 text-lg font-black uppercase tracking-wide text-[color:var(--neon-yellow)]">
+              Festa encerrada!
+            </p>
+            <p className="mt-1 text-sm font-bold text-[color:var(--neon-yellow)]/80">
+              Vai na aba Votação e registra o que aconteceu!
+            </p>
+          </div>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid h-12 w-full grid-cols-3 rounded-xl bg-secondary p-1">
             <TabsTrigger value="pending" className="relative text-xs font-bold uppercase">
               Pendentes
-              {hasUnvotedPending && (
-                <span className="ml-1 text-base">⚠️</span>
-              )}
+              {hasUnvotedPending && <span className="ml-1 text-base">⚠️</span>}
             </TabsTrigger>
             <TabsTrigger
               value="live"
@@ -89,8 +172,9 @@ function PartyPage() {
               {hasUnvotedPending && <Lock className="h-3 w-3" />}
               Ao Vivo
             </TabsTrigger>
-            <TabsTrigger value="vote" className="text-xs font-bold uppercase">
+            <TabsTrigger value="vote" className="relative text-xs font-bold uppercase">
               Votação
+              {ended && <span className="ml-1 text-base">🗳️</span>}
             </TabsTrigger>
           </TabsList>
 
@@ -120,6 +204,17 @@ function PartyPage() {
           </TabsContent>
 
           <TabsContent value="vote" className="mt-4 space-y-3">
+            {ended && (
+              <div className="rounded-2xl border-2 border-[color:var(--neon-yellow)] bg-[color:var(--neon-yellow)]/10 p-4 text-center">
+                <p className="text-3xl">🗳️</p>
+                <p className="mt-1 font-black uppercase tracking-wide text-[color:var(--neon-yellow)]">
+                  Vote no que aconteceu!
+                </p>
+                <p className="mt-0.5 text-xs text-[color:var(--neon-yellow)]/80">
+                  São necessários 2 votos para confirmar cada resultado.
+                </p>
+              </div>
+            )}
             {partyBets.length === 0 && <Empty msg="Nada pra votar ainda." />}
             {partyBets.map((b) => (
               <VoteCard key={b.id} bet={b} />
@@ -156,13 +251,7 @@ function Empty({ msg }: { msg: string }) {
   );
 }
 
-function PendingCard({
-  pb,
-  onVote,
-}: {
-  pb: PendingBet;
-  onVote: (id: string, vote: "approve" | "reject") => void;
-}) {
+function PendingCard({ pb, onVote }: { pb: PendingBet; onVote: (id: string, v: "approve" | "reject") => void }) {
   const voted = pb.approvedByMe || pb.rejectedByMe;
   return (
     <div className="rounded-2xl border border-border/60 bg-card p-4">
@@ -174,47 +263,32 @@ function PendingCard({
       )}
       <p className="text-base font-bold leading-snug">{pb.description}</p>
 
-      {/* odds */}
       <div className="mt-3 grid grid-cols-2 gap-2 text-center">
         <div className="rounded-xl bg-[color:var(--neon-green)]/10 px-2 py-2">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-green)]">
-            A Favor
-          </p>
-          <p className="text-xl font-black tabular-nums text-green-400">
-            {pb.oddFor.toFixed(2)}x
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-green)]">A Favor</p>
+          <p className="text-xl font-black tabular-nums text-green-400">{pb.oddFor.toFixed(2)}x</p>
         </div>
         <div className="rounded-xl bg-[color:var(--neon-red)]/10 px-2 py-2">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">
-            Contra
-          </p>
-          <p className="text-xl font-black tabular-nums text-[color:var(--neon-red)]">
-            {pb.oddAgainst.toFixed(2)}x
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">Contra</p>
+          <p className="text-xl font-black tabular-nums text-[color:var(--neon-red)]">{pb.oddAgainst.toFixed(2)}x</p>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="mt-3 flex items-center gap-3">
         {voted ? (
-          <p className="w-full text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
+          <p className="flex-1 text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
             {pb.approvedByMe ? "✓ Votou: faz sentido" : "✗ Votou: não faz sentido"}
           </p>
         ) : (
           <>
             <Button
-              onClick={() => {
-                onVote(pb.id, "approve");
-                toast.success("Votou: faz sentido 👍");
-              }}
+              onClick={() => { onVote(pb.id, "approve"); toast.success("Votou: faz sentido 👍"); }}
               className="h-11 flex-1 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
             >
               👍 Faz Sentido
             </Button>
             <Button
-              onClick={() => {
-                onVote(pb.id, "reject");
-                toast.success("Votou: não faz sentido 👎");
-              }}
+              onClick={() => { onVote(pb.id, "reject"); toast.success("Votou: não faz sentido 👎"); }}
               className="h-11 flex-1 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
             >
               👎 Não Faz
@@ -222,12 +296,8 @@ function PendingCard({
           </>
         )}
         <div className="shrink-0 text-right">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            Aprovações
-          </p>
-          <p className="text-lg font-black tabular-nums text-green-400">
-            {pb.approvals}/{pb.needed}
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Aprovações</p>
+          <p className="text-lg font-black tabular-nums text-green-400">{pb.approvals}/{pb.needed}</p>
         </div>
       </div>
     </div>
@@ -245,20 +315,12 @@ function BetCard({ bet }: { bet: Bet }) {
 
       <div className="grid grid-cols-2 gap-2 text-center">
         <div className="rounded-xl bg-[color:var(--neon-green)]/10 px-2 py-2">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-green)]">
-            A Favor
-          </p>
-          <p className="text-2xl font-black tabular-nums text-green-400">
-            {bet.oddFor.toFixed(2)}x
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-green)]">A Favor</p>
+          <p className="text-2xl font-black tabular-nums text-green-400">{bet.oddFor.toFixed(2)}x</p>
         </div>
         <div className="rounded-xl bg-[color:var(--neon-red)]/10 px-2 py-2">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">
-            Contra
-          </p>
-          <p className="text-2xl font-black tabular-nums text-[color:var(--neon-red)]">
-            {bet.oddAgainst.toFixed(2)}x
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--neon-red)]">Contra</p>
+          <p className="text-2xl font-black tabular-nums text-[color:var(--neon-red)]">{bet.oddAgainst.toFixed(2)}x</p>
         </div>
       </div>
 
@@ -270,11 +332,7 @@ function BetCard({ bet }: { bet: Bet }) {
           <p className="mt-0.5 text-xs text-muted-foreground">
             Retorno potencial:{" "}
             <span className="font-black text-green-400">
-              {(
-                bet.placed.amount *
-                (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst)
-              ).toFixed(2)}{" "}
-              conto
+              {(bet.placed.amount * (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst)).toFixed(2)} conto
             </span>
           </p>
         </div>
@@ -298,9 +356,7 @@ function BetCard({ bet }: { bet: Bet }) {
       <Dialog open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              Apostar {open === "for" ? "a favor" : "contra"}
-            </DialogTitle>
+            <DialogTitle>Apostar {open === "for" ? "a favor" : "contra"}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">{bet.description}</p>
           <div className="flex items-center gap-2">
@@ -318,11 +374,7 @@ function BetCard({ bet }: { bet: Bet }) {
           <p className="text-xs text-muted-foreground">
             Retorno potencial:{" "}
             <span className="font-black text-green-400">
-              {(
-                (Number(amt) || 0) *
-                (open === "for" ? bet.oddFor : bet.oddAgainst)
-              ).toFixed(2)}{" "}
-              conto
+              {((Number(amt) || 0) * (open === "for" ? bet.oddFor : bet.oddAgainst)).toFixed(2)} conto
             </span>
           </p>
           <DialogFooter>
@@ -332,10 +384,7 @@ function BetCard({ bet }: { bet: Bet }) {
                 if (!open) return;
                 const n = Number(amt);
                 if (!n || n < 1) { toast.error("Valor inválido"); return; }
-                if (!spend(n)) {
-                  toast.error("Sem conto suficiente");
-                  return;
-                }
+                if (!spend(n)) { toast.error("Sem conto suficiente"); return; }
                 placeBet(bet.id, open, n);
                 toast.success(`Aposta de ${n} conto confirmada`);
                 setOpen(null);
@@ -353,25 +402,44 @@ function BetCard({ bet }: { bet: Bet }) {
 function VoteCard({ bet }: { bet: Bet }) {
   const { voteBet } = useApp();
   const voted = !!bet.voted;
+  const resolved = !!bet.resolved;
+
   return (
-    <div
-      className={
-        "rounded-2xl border border-border/60 bg-card p-4 transition " +
-        (voted ? "opacity-50" : "")
-      }
-    >
+    <div className={"rounded-2xl border border-border/60 bg-card p-4 transition " + (resolved ? "opacity-60" : "")}>
       <p className="text-base font-bold leading-snug">{bet.description}</p>
-      {voted ? (
+
+      {/* vote progress */}
+      <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
+        <span className="font-bold text-green-400">✓ Aconteceu: {bet.votesHappened}/2</span>
+        <span className="font-bold text-[color:var(--neon-red)]">✗ Não rolou: {bet.votesNot}/2</span>
+      </div>
+
+      {resolved ? (
+        <div className="mt-3 rounded-xl border border-green-400/40 bg-green-400/10 p-3 text-center">
+          <p className="font-black uppercase tracking-wide text-green-400">
+            Resultado: {bet.resolved === "happened" ? "✓ ACONTECEU" : "✗ NÃO ROLOU"}
+          </p>
+        </div>
+      ) : voted ? (
         <p className="mt-3 text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
-          Seu voto foi registrado
+          Seu voto foi registrado — aguardando mais votos
         </p>
       ) : (
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Button
             className="h-12 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
             onClick={() => {
-              voteBet(bet.id, "happened");
-              toast.success("Voto registrado: aconteceu");
+              const result = voteBet(bet.id, "happened");
+              if (result.resolved && result.won && result.winnings > 0) {
+                toast.success(
+                  `PORRAAAA VOCÊ GANHOU ${result.winnings} CONTO COM ${result.description}`,
+                  { duration: 6000 },
+                );
+              } else if (result.resolved && !result.won) {
+                toast.error("Resultado registrado: você não ganhou dessa vez 😅");
+              } else {
+                toast.success("Voto registrado: aconteceu ✓");
+              }
             }}
           >
             ACONTECEU
@@ -379,8 +447,17 @@ function VoteCard({ bet }: { bet: Bet }) {
           <Button
             className="h-12 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
             onClick={() => {
-              voteBet(bet.id, "not");
-              toast.success("Voto registrado: não rolou");
+              const result = voteBet(bet.id, "not");
+              if (result.resolved && result.won && result.winnings > 0) {
+                toast.success(
+                  `PORRAAAA VOCÊ GANHOU ${result.winnings} CONTO COM ${result.description}`,
+                  { duration: 6000 },
+                );
+              } else if (result.resolved && !result.won) {
+                toast.error("Resultado registrado: você não ganhou dessa vez 😅");
+              } else {
+                toast.success("Voto registrado: não rolou ✗");
+              }
             }}
           >
             NÃO ACONTECEU
@@ -401,8 +478,10 @@ function SuggestDialog({
   onSuggest: (desc: string, oFor: number, oAgainst: number) => void;
 }) {
   const [desc, setDesc] = useState("");
-  const [oFor, setOFor] = useState("1.80");
-  const [oAgainst, setOAgainst] = useState("2.00");
+  const [oFor, setOFor] = useState(1.8);
+  const [oAgainst, setOAgainst] = useState(2.0);
+  const againstRef = useRef<HTMLInputElement>(null);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -416,54 +495,31 @@ function SuggestDialog({
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
           />
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs font-bold uppercase text-green-400">
-                Odd A Favor
-              </label>
-              <Input
-                type="number"
-                inputMode="decimal"
-                pattern="[0-9]*[.,]?[0-9]*"
-                step={0.05}
-                min={1.01}
-                value={oFor}
-                onChange={(e) => setOFor(e.target.value)}
-                className="h-12 font-black tabular-nums text-green-400"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold uppercase text-[color:var(--neon-red)]">
-                Odd Contra
-              </label>
-              <Input
-                type="number"
-                inputMode="decimal"
-                pattern="[0-9]*[.,]?[0-9]*"
-                step={0.05}
-                min={1.01}
-                value={oAgainst}
-                onChange={(e) => setOAgainst(e.target.value)}
-                className="h-12 font-black tabular-nums"
-              />
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <OddsInput
+              value={oFor}
+              onChange={setOFor}
+              onComplete={() => againstRef.current?.focus()}
+              label="Odd A Favor"
+              colorClass="text-green-400"
+            />
+            {/* We render OddsInput for Against but also need the ref trick */}
+            <OddsInputWithRef
+              value={oAgainst}
+              onChange={setOAgainst}
+              inputRef={againstRef}
+              label="Odd Contra"
+              colorClass="text-[color:var(--neon-red)]"
+            />
           </div>
         </div>
         <DialogFooter>
           <Button
             className="h-12 w-full font-bold"
             onClick={() => {
-              if (!desc.trim()) {
-                toast.error("Descreve a merda aí");
-                return;
-              }
-              const f = Number(oFor);
-              const a = Number(oAgainst);
-              if (f < 1.01 || a < 1.01) {
-                toast.error("Odds precisam ser maiores que 1.01");
-                return;
-              }
-              onSuggest(desc.trim(), f, a);
+              if (!desc.trim()) { toast.error("Descreve a merda aí"); return; }
+              if (oFor < 1.01 || oAgainst < 1.01) { toast.error("Odds precisam ser > 1.01"); return; }
+              onSuggest(desc.trim(), oFor, oAgainst);
               setDesc("");
               onOpenChange(false);
             }}
@@ -473,5 +529,59 @@ function SuggestDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Variant with external ref for focus management
+function OddsInputWithRef({
+  value,
+  onChange,
+  inputRef,
+  label,
+  colorClass = "text-green-400",
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  label: string;
+  colorClass?: string;
+}) {
+  const [digits, setDigits] = useState(() => digitsFromNumber(value));
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key >= "0" && e.key <= "9") {
+      e.preventDefault();
+      const next = digits + e.key;
+      if (next.length > 4) return;
+      const intPart = next.length <= 2 ? parseInt(next) : parseInt(next.slice(0, next.length - 2));
+      if (intPart > 99) return;
+      setDigits(next);
+      onChange(parseOddFromDigits(next));
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      const next = digits.slice(0, -1);
+      setDigits(next);
+      onChange(parseOddFromDigits(next));
+    }
+  }
+
+  function handleFocus() {
+    setTimeout(() => (inputRef.current as HTMLInputElement | null)?.select(), 0);
+  }
+
+  return (
+    <div>
+      <label className={`text-xs font-bold uppercase ${colorClass}`}>{label}</label>
+      <input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        type="text"
+        inputMode="numeric"
+        value={displayOdd(digits)}
+        onChange={() => {}}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        className={`mt-1 h-12 w-full rounded-md border border-input bg-background px-3 text-center text-xl font-black tabular-nums outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 ${colorClass}`}
+      />
+    </div>
   );
 }

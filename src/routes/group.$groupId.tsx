@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useApp } from "@/lib/app-context";
-import type { Party } from "@/lib/mock-data";
+import { isEnded, type Party } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/group/$groupId")({
   head: () => ({ meta: [{ title: "MerdaBet — Grupo" }] }),
@@ -66,9 +66,11 @@ function GroupPage() {
                 party={p}
                 onConfirmAttendance={() => {
                   confirmAttendance(p.id);
-                  toast.success("Presença confirmada! +50 conto 🪙");
+                  toast.success("Presença confirmada! +10 conto 🪙");
                 }}
-                onEnter={() => navigate({ to: "/party/$partyId", params: { partyId: p.id } })}
+                onEnter={() =>
+                  navigate({ to: "/party/$partyId", params: { partyId: p.id } })
+                }
               />
             ))}
             {groupParties.length === 0 && (
@@ -88,16 +90,14 @@ function GroupPage() {
           )}
         </section>
 
-        {/* Esmola card — abaixo das festas */}
+        {/* Esmola card */}
         <section className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="flex items-center gap-1.5 text-sm font-black uppercase tracking-widest text-neon-purple">
-                <HandHeart className="h-4 w-4" />
-                Esmolinha
-              </h3>
-              <p className="text-xs text-muted-foreground">Tá liso? Pede aí.</p>
-            </div>
+          <div>
+            <h3 className="flex items-center gap-1.5 text-sm font-black uppercase tracking-widest text-neon-purple">
+              <HandHeart className="h-4 w-4" />
+              Esmolinha
+            </h3>
+            <p className="text-xs text-muted-foreground">Tá liso? Pede aí.</p>
           </div>
           <div className="flex items-center gap-2">
             <Input
@@ -161,7 +161,6 @@ function GroupPage() {
         </section>
       </main>
 
-      {/* FAB */}
       <button
         onClick={() => setFabOpen(true)}
         className="glow-purple fixed bottom-6 right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-primary text-primary-foreground"
@@ -182,7 +181,14 @@ function GroupPage() {
   );
 }
 
-function statusBadge(s: Party["status"]) {
+function statusBadge(s: Party["status"], ended: boolean) {
+  if (ended) {
+    return (
+      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+        Encerrada
+      </span>
+    );
+  }
   switch (s) {
     case "pending":
       return (
@@ -216,54 +222,55 @@ function PartyCard({
 }) {
   const date = new Date(party.start);
   const beforeStart = Date.now() < date.getTime();
-  const needsAttendance = beforeStart && !party.attending;
+  const ended = isEnded(party);
+  const needsAttendance = beforeStart && !party.attending && !ended;
 
   return (
-    <li className="rounded-2xl border border-border/60 bg-card p-4 transition hover:border-primary/60">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-base font-bold">{party.name}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {date.toLocaleDateString("pt-BR", {
-              day: "2-digit",
-              month: "short",
-            })}{" "}
-            ·{" "}
-            {date.toLocaleTimeString("pt-BR", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+    <li className="overflow-hidden rounded-2xl border border-border/60 bg-card transition hover:border-primary/60">
+      {ended && (
+        <div className="flex items-center justify-center gap-2 bg-[color:var(--neon-yellow)]/15 px-4 py-2 text-center">
+          <span className="text-xl">🗳️</span>
+          <p className="text-xs font-black uppercase tracking-wider text-[color:var(--neon-yellow)]">
+            Festa encerrada — Vote nas apostas!
           </p>
         </div>
-        {statusBadge(party.status)}
-      </div>
+      )}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-base font-bold">{party.name}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}{" "}
+              ·{" "}
+              {date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+          {statusBadge(party.status, ended)}
+        </div>
 
-      <div className="mt-3 flex gap-2">
-        {needsAttendance && (
+        <div className="mt-3 flex gap-2">
+          {needsAttendance && (
+            <Button
+              size="sm"
+              className="h-10 flex-1 animate-pulse bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+              onClick={(e) => { e.stopPropagation(); onConfirmAttendance(); }}
+            >
+              🎉 Vou na festa!
+            </Button>
+          )}
+          {party.attending && (
+            <span className="flex h-10 flex-1 items-center justify-center rounded-lg border border-green-400/40 bg-green-400/10 text-xs font-black uppercase tracking-wider text-green-400">
+              ✓ Confirmado
+            </span>
+          )}
           <Button
             size="sm"
-            className="h-10 flex-1 animate-pulse bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
-            onClick={(e) => {
-              e.stopPropagation();
-              onConfirmAttendance();
-            }}
+            className="h-12 flex-[2] bg-primary font-black text-primary-foreground hover:bg-primary/90"
+            onClick={onEnter}
           >
-            🎉 Vou na festa! +50 conto
+            Entrar na festa →
           </Button>
-        )}
-        {party.attending && !needsAttendance && (
-          <span className="flex h-10 flex-1 items-center justify-center rounded-lg border border-[color:var(--neon-green)]/40 bg-[color:var(--neon-green)]/10 text-xs font-black uppercase tracking-wider text-[color:var(--neon-green)]">
-            ✓ Vou na festa
-          </span>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-10 font-bold"
-          onClick={onEnter}
-        >
-          Entrar →
-        </Button>
+        </div>
       </div>
     </li>
   );
@@ -327,11 +334,7 @@ function AddPartyDialog({
                 toast.error("Preenche tudo");
                 return;
               }
-              onAdd(
-                name,
-                new Date(start).toISOString(),
-                new Date(end).toISOString(),
-              );
+              onAdd(name, new Date(start).toISOString(), new Date(end).toISOString());
               setName("");
               setStart("");
               setEnd("");

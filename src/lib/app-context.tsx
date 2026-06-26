@@ -21,10 +21,17 @@ import {
 
 type User = { name: string } | null;
 
+export type VoteBetResult = {
+  resolved: boolean;
+  outcome?: "happened" | "not";
+  won: boolean;
+  winnings: number;
+  description: string;
+};
+
 type Ctx = {
   user: User;
   balance: number;
-  /** Returns null on success, or an error message string on failure. */
   login: (name: string, password: string) => string | null;
   logout: () => void;
   addBalance: (n: number) => void;
@@ -45,7 +52,7 @@ type Ctx = {
 
   bets: Bet[];
   placeBet: (betId: string, side: "for" | "against", amount: number) => void;
-  voteBet: (betId: string, vote: "happened" | "not") => void;
+  voteBet: (betId: string, vote: "happened" | "not") => VoteBetResult;
 
   esmolas: Esmola[];
   requestEsmola: (groupId: string, amount: number) => void;
@@ -75,7 +82,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setBalance(50);
         return null;
       }
-      // new user — register
       setUserRegistry((r) => ({ ...r, [name]: password }));
       setUser({ name });
       setBalance(50);
@@ -100,12 +106,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createGroup = useCallback((name: string, password: string) => {
-    const g: Group = {
-      id: `g${Date.now()}`,
-      name,
-      members: 1,
-      password,
-    };
+    const g: Group = { id: `g${Date.now()}`, name, members: 1, password };
     setGroups((gs) => [g, ...gs]);
     setJoined((j) => [g.id, ...j]);
     return g;
@@ -124,6 +125,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         start,
         end,
         status: "pending",
+        attendees: 0,
       };
       setParties((ps) => [p, ...ps]);
     },
@@ -132,47 +134,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const confirmAttendance = useCallback((partyId: string) => {
     setParties((ps) =>
-      ps.map((p) => (p.id === partyId ? { ...p, attending: true } : p)),
+      ps.map((p) =>
+        p.id === partyId
+          ? { ...p, attending: true, attendees: p.attendees + 1 }
+          : p,
+      ),
     );
-    setBalance((b) => b + 50);
+    setBalance((b) => b + 10);
   }, []);
 
-  const votePending = useCallback((id: string, vote: "approve" | "reject") => {
-    setPending((ps) => {
-      const updated = ps.map((p) => {
-        if (p.id !== id) return p;
-        if (p.approvedByMe || p.rejectedByMe) return p;
-        const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
-        return {
-          ...p,
-          approvals: newApprovals,
-          approvedByMe: vote === "approve" ? true : p.approvedByMe,
-          rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
-        };
+  const votePending = useCallback(
+    (id: string, vote: "approve" | "reject") => {
+      setPending((ps) => {
+        const updated = ps.map((p) => {
+          if (p.id !== id) return p;
+          if (p.approvedByMe || p.rejectedByMe) return p;
+          const newApprovals = vote === "approve" ? p.approvals + 1 : p.approvals;
+          return {
+            ...p,
+            approvals: newApprovals,
+            approvedByMe: vote === "approve" ? true : p.approvedByMe,
+            rejectedByMe: vote === "reject" ? true : p.rejectedByMe,
+          };
+        });
+
+        const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
+        if (promoted) {
+          setBets((bs) => [
+            {
+              id: `b${Date.now()}`,
+              partyId: promoted.partyId,
+              description: promoted.description,
+              oddFor: promoted.oddFor,
+              oddAgainst: promoted.oddAgainst,
+              votesHappened: 0,
+              votesNot: 0,
+            },
+            ...bs,
+          ]);
+          return updated.filter((p) => p.id !== id);
+        }
+        return updated;
       });
-
-      // auto-promote to live if reached needed approvals
-      const promoted = updated.find((p) => p.id === id && p.approvals >= p.needed);
-      if (promoted) {
-        setBets((bs) => [
-          {
-            id: `b${Date.now()}`,
-            partyId: promoted.partyId,
-            description: promoted.description,
-            oddFor: promoted.oddFor,
-            oddAgainst: promoted.oddAgainst,
-          },
-          ...bs,
-        ]);
-        return updated.filter((p) => p.id !== id);
-      }
-
-      return updated;
-    });
-  }, []);
+    },
+    [],
+  );
 
   const suggestBet = useCallback(
     (partyId: string, description: string, oddFor: number, oddAgainst: number) => {
+      const party = parties.find((p) => p.id === partyId);
+      const attendees = party?.attendees ?? 0;
+      const needed = Math.max(1, Math.ceil(attendees / 3));
       const pb: PendingBet = {
         id: `pb${Date.now()}`,
         partyId,
@@ -180,11 +192,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         oddFor,
         oddAgainst,
         approvals: 0,
-        needed: 3,
+        needed,
       };
       setPending((ps) => [pb, ...ps]);
     },
-    [],
+    [parties],
   );
 
   const placeBet = useCallback(
@@ -196,9 +208,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const voteBet = useCallback((betId: string, vote: "happened" | "not") => {
-    setBets((bs) => bs.map((b) => (b.id === betId ? { ...b, voted: vote } : b)));
-  }, []);
+  const voteBet = useCallback(
+    (betId: string, vote: "happened" | "not"): VoteBetResult => {
+      const bet = bets.find((b) => b.id === betId);
+      if (!bet || bet.voted) {
+        return { resolved: false, won: false, winnings: 0, description: "" };
+      }
+
+      const newVotesHappened =
+        vote === "happened" ? bet.votesHappened + 1 : bet.votesHappened;
+      const newVotesNot =
+        vote === "not" ? bet.votesNot + 1 : bet.votesNot;
+
+      let outcome: "happened" | "not" | undefined;
+      if (newVotesHappened >= 2) outcome = "happened";
+      else if (newVotesNot >= 2) outcome = "not";
+
+      let won = false;
+      let winnings = 0;
+
+      if (outcome && bet.placed) {
+        won =
+          (outcome === "happened" && bet.placed.side === "for") ||
+          (outcome === "not" && bet.placed.side === "against");
+        if (won) {
+          winnings = Math.round(
+            bet.placed.amount *
+              (bet.placed.side === "for" ? bet.oddFor : bet.oddAgainst),
+          );
+          setBalance((b) => b + winnings);
+        }
+      }
+
+      setBets((bs) =>
+        bs.map((b) =>
+          b.id === betId
+            ? {
+                ...b,
+                votesHappened: newVotesHappened,
+                votesNot: newVotesNot,
+                voted: vote,
+                resolved: outcome,
+              }
+            : b,
+        ),
+      );
+
+      return {
+        resolved: !!outcome,
+        outcome,
+        won,
+        winnings,
+        description: bet.description,
+      };
+    },
+    [bets],
+  );
 
   const requestEsmola = useCallback(
     (groupId: string, amount: number) => {
@@ -212,7 +277,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const donateEsmola = useCallback((id: string) => {
-    setEsmolas((es) => es.map((e) => (e.id === id ? { ...e, donated: true } : e)));
+    setEsmolas((es) =>
+      es.map((e) => (e.id === id ? { ...e, donated: true } : e)),
+    );
   }, []);
 
   const value = useMemo<Ctx>(
@@ -241,28 +308,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       donateEsmola,
     }),
     [
-      user,
-      balance,
-      login,
-      logout,
-      addBalance,
-      spend,
-      groups,
-      joinedGroupIds,
-      createGroup,
-      joinGroup,
-      parties,
-      addParty,
-      confirmAttendance,
-      pending,
-      votePending,
-      suggestBet,
-      bets,
-      placeBet,
-      voteBet,
-      esmolas,
-      requestEsmola,
-      donateEsmola,
+      user, balance, login, logout, addBalance, spend,
+      groups, joinedGroupIds, createGroup, joinGroup,
+      parties, addParty, confirmAttendance,
+      pending, votePending, suggestBet,
+      bets, placeBet, voteBet,
+      esmolas, requestEsmola, donateEsmola,
     ],
   );
 

@@ -8,6 +8,9 @@ export type Bet = {
   oddAgainst: number;
   placed?: { side: "for" | "against"; amount: number };
   voted?: "happened" | "not";
+  votesHappened: number;
+  votesNot: number;
+  resolved?: "happened" | "not";
 };
 
 export type PendingBet = {
@@ -30,6 +33,7 @@ export type Party = {
   end: string;
   status: PartyStatus;
   attending?: boolean;
+  attendees: number;
 };
 
 export type Esmola = {
@@ -46,6 +50,10 @@ export type Group = {
   members: number;
   password: string;
 };
+
+export function isEnded(party: Party): boolean {
+  return new Date(party.end).getTime() < Date.now();
+}
 
 export const initialGroups: Group[] = [];
 export const initialEsmolas: Esmola[] = [];
