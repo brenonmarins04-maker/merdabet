@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PartyPartyIdRouteImport } from './routes/party.$partyId'
 import { Route as GroupGroupIdRouteImport } from './routes/group.$groupId'
 
 const AuthRoute = AuthRouteImport.update({
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PartyPartyIdRoute = PartyPartyIdRouteImport.update({
+  id: '/party/$partyId',
+  path: '/party/$partyId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GroupGroupIdRoute = GroupGroupIdRouteImport.update({
   id: '/group/$groupId',
   path: '/group/$groupId',
@@ -33,30 +39,34 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/group/$groupId': typeof GroupGroupIdRoute
+  '/party/$partyId': typeof PartyPartyIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/group/$groupId': typeof GroupGroupIdRoute
+  '/party/$partyId': typeof PartyPartyIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/group/$groupId': typeof GroupGroupIdRoute
+  '/party/$partyId': typeof PartyPartyIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/group/$groupId'
+  fullPaths: '/' | '/auth' | '/group/$groupId' | '/party/$partyId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/group/$groupId'
-  id: '__root__' | '/' | '/auth' | '/group/$groupId'
+  to: '/' | '/auth' | '/group/$groupId' | '/party/$partyId'
+  id: '__root__' | '/' | '/auth' | '/group/$groupId' | '/party/$partyId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
   GroupGroupIdRoute: typeof GroupGroupIdRoute
+  PartyPartyIdRoute: typeof PartyPartyIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/party/$partyId': {
+      id: '/party/$partyId'
+      path: '/party/$partyId'
+      fullPath: '/party/$partyId'
+      preLoaderRoute: typeof PartyPartyIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/group/$groupId': {
       id: '/group/$groupId'
       path: '/group/$groupId'
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
   GroupGroupIdRoute: GroupGroupIdRoute,
+  PartyPartyIdRoute: PartyPartyIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
