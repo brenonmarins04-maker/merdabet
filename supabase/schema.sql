@@ -122,7 +122,7 @@ create table bet_placements (
 create table bet_votes (
   bet_id text not null references bets(id) on delete cascade,
   user_id text not null references users(id) on delete cascade,
-  vote text not null check (vote in ('happened', 'not')),
+  vote text not null check (vote in ('happened', 'not', 'unsure')),
   primary key (bet_id, user_id)
 );
 

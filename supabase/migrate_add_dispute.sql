@@ -26,7 +26,12 @@ CREATE TABLE IF NOT EXISTS bet_dispute_votes (
 
 ALTER TABLE bet_dispute_votes DISABLE ROW LEVEL SECURITY;
 
--- 4. Backfill placements_count and total_wagered from existing bet_placements rows
+-- 4. Update bet_votes constraint to allow 'unsure' votes
+ALTER TABLE bet_votes DROP CONSTRAINT IF EXISTS bet_votes_vote_check;
+ALTER TABLE bet_votes ADD CONSTRAINT bet_votes_vote_check
+  CHECK (vote IN ('happened', 'not', 'unsure'));
+
+-- 5. Backfill placements_count and total_wagered from existing bet_placements rows
 --    (needed if bets were placed before these columns were added)
 UPDATE bets SET
   placements_count = (SELECT COUNT(*)           FROM bet_placements WHERE bet_id = bets.id),

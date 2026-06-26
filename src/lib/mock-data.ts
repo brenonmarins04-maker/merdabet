@@ -6,7 +6,7 @@ export type Bet = {
   description: string;
   odd: number;
   placed?: { amount: number };
-  voted?: "happened" | "not";
+  voted?: "happened" | "not" | "unsure";
   votesHappened: number;
   votesNot: number;
   resolved?: "happened" | "not";

@@ -119,7 +119,7 @@ function mapPendingBet(
 function mapBet(
   r: DbBet,
   placedMap: Map<string, number>,
-  votedMap: Map<string, "happened" | "not">,
+  votedMap: Map<string, "happened" | "not" | "unsure">,
   disputeVotedMap: Map<string, "approve" | "reject">,
   topPlacerMap: Map<string, { userId: string; amount: number }>,
 ): Bet {
@@ -176,7 +176,7 @@ type Ctx = {
 
   bets: Bet[];
   placeBet: (betId: string, amount: number) => void;
-  voteBet: (betId: string, vote: "happened" | "not") => VoteBetResult;
+  voteBet: (betId: string, vote: "happened" | "not" | "unsure") => VoteBetResult;
   requestDispute: (betId: string, type: "change_odd" | "delete", newOdd?: number) => void;
   voteDispute: (betId: string, vote: "approve" | "reject") => void;
 
@@ -207,7 +207,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const approvedPendingIdsRef = useRef<Set<string>>(new Set());
   const rejectedPendingIdsRef = useRef<Set<string>>(new Set());
   const placedMapRef = useRef<Map<string, number>>(new Map());
-  const votedMapRef = useRef<Map<string, "happened" | "not">>(new Map());
+  const votedMapRef = useRef<Map<string, "happened" | "not" | "unsure">>(new Map());
   const disputeVotedMapRef = useRef<Map<string, "approve" | "reject">>(new Map());
   const topPlacerMapRef = useRef<Map<string, { userId: string; amount: number }>>(new Map());
 
@@ -259,8 +259,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const placedMap = new Map<string, number>(
       (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
     );
-    const votedMap = new Map<string, "happened" | "not">(
-      (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not"] as [string, "happened" | "not"]),
+    const votedMap = new Map<string, "happened" | "not" | "unsure">(
+      (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not" | "unsure"] as [string, "happened" | "not" | "unsure"]),
     );
     const disputeVotedMap = new Map<string, "approve" | "reject">(
       (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
@@ -339,8 +339,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const placedMap = new Map<string, number>(
       (placementsRes.data ?? []).map((r: { bet_id: string; amount: number }) => [r.bet_id, r.amount] as [string, number]),
     );
-    const votedMap = new Map<string, "happened" | "not">(
-      (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not"] as [string, "happened" | "not"]),
+    const votedMap = new Map<string, "happened" | "not" | "unsure">(
+      (betVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "happened" | "not" | "unsure"] as [string, "happened" | "not" | "unsure"]),
     );
     const disputeVotedMap = new Map<string, "approve" | "reject">(
       (disputeVotesRes.data ?? []).map((r: { bet_id: string; vote: string }) => [r.bet_id, r.vote as "approve" | "reject"] as [string, "approve" | "reject"]),
@@ -795,7 +795,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const voteBet = useCallback(
-    (betId: string, vote: "happened" | "not"): VoteBetResult => {
+    (betId: string, vote: "happened" | "not" | "unsure"): VoteBetResult => {
       const bet = bets.find((b) => b.id === betId);
       if (!bet || bet.voted || !user) {
         return { resolved: false, won: false, winnings: 0, description: "" };

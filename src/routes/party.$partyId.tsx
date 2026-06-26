@@ -254,13 +254,15 @@ function PartyPage() {
         </Tabs>
       </main>
 
-      <button
-        onClick={() => setSuggestOpen(true)}
-        className="glow-purple fixed bottom-6 left-1/2 z-40 flex h-14 -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-6 text-sm font-black uppercase tracking-wider text-primary-foreground"
-      >
-        <Plus className="h-5 w-5" />
-        Sugerir uma Merda
-      </button>
+      {!ended && (
+        <button
+          onClick={() => setSuggestOpen(true)}
+          className="glow-purple fixed bottom-6 left-1/2 z-40 flex h-14 -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-6 text-sm font-black uppercase tracking-wider text-primary-foreground"
+        >
+          <Plus className="h-5 w-5" />
+          Sugerir uma Merda
+        </button>
+      )}
 
       <SuggestDialog
         open={suggestOpen}
@@ -539,6 +541,12 @@ function VoteCard({ bet }: { bet: Bet }) {
   const voted = !!bet.voted;
   const resolved = !!bet.resolved;
 
+  const voteLabel =
+    bet.voted === "happened" ? "✓ Votou: aconteceu"
+    : bet.voted === "not" ? "✗ Votou: não rolou"
+    : bet.voted === "unsure" ? "🤷 Votou: não sei"
+    : null;
+
   return (
     <div className={"rounded-2xl border border-border/60 bg-card p-4 transition " + (resolved ? "opacity-60" : "")}>
       <p className="text-base font-bold leading-snug">{bet.description}</p>
@@ -559,37 +567,49 @@ function VoteCard({ bet }: { bet: Bet }) {
         </div>
       ) : voted ? (
         <p className="mt-3 text-center text-xs font-black uppercase tracking-wider text-muted-foreground">
-          Seu voto foi registrado — aguardando mais votos
+          {voteLabel} — aguardando mais votos
         </p>
       ) : (
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              className="h-12 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+              onClick={() => {
+                const result = voteBet(bet.id, "happened");
+                if (result.resolved && result.won && result.winnings > 0) {
+                  toast.success(`PORRAAAA VOCÊ GANHOU ${result.winnings} CONTO COM ${result.description}`, { duration: 6000 });
+                } else if (result.resolved) {
+                  toast.error("Resultado registrado: você não ganhou dessa vez 😅");
+                } else {
+                  toast.success("Voto registrado: aconteceu ✓");
+                }
+              }}
+            >
+              ACONTECEU
+            </Button>
+            <Button
+              className="h-12 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
+              onClick={() => {
+                const result = voteBet(bet.id, "not");
+                if (result.resolved) {
+                  toast.error("Resultado registrado: não rolou ✗");
+                } else {
+                  toast.success("Voto registrado: não rolou ✗");
+                }
+              }}
+            >
+              NÃO ACONTECEU
+            </Button>
+          </div>
           <Button
-            className="h-12 bg-[color:var(--neon-green)] font-black text-zinc-950 hover:bg-[color:var(--neon-green)]/90"
+            variant="outline"
+            className="h-10 w-full font-bold text-muted-foreground"
             onClick={() => {
-              const result = voteBet(bet.id, "happened");
-              if (result.resolved && result.won && result.winnings > 0) {
-                toast.success(`PORRAAAA VOCÊ GANHOU ${result.winnings} CONTO COM ${result.description}`, { duration: 6000 });
-              } else if (result.resolved) {
-                toast.error("Resultado registrado: você não ganhou dessa vez 😅");
-              } else {
-                toast.success("Voto registrado: aconteceu ✓");
-              }
+              voteBet(bet.id, "unsure");
+              toast("Voto registrado: não sei 🤷");
             }}
           >
-            ACONTECEU
-          </Button>
-          <Button
-            className="h-12 bg-[color:var(--neon-red)] font-black text-white hover:bg-[color:var(--neon-red)]/90"
-            onClick={() => {
-              const result = voteBet(bet.id, "not");
-              if (result.resolved) {
-                toast.error("Resultado registrado: não rolou ✗");
-              } else {
-                toast.success("Voto registrado: não rolou ✗");
-              }
-            }}
-          >
-            NÃO ACONTECEU
+            🤷 NÃO SEI
           </Button>
         </div>
       )}
